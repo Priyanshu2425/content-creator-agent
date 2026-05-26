@@ -1,0 +1,44 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "duration": 2.0,
+  "layers": [
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "host.mp4",
+      "in": null
+    },
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "audio",
+      "src": "host.mp4",
+      "in": null
+    }
+  ]
+}

@@ -7,8 +7,9 @@ Design is captured in [`CONTEXT.md`](CONTEXT.md) (glossary), [`docs/adr/`](docs/
 (decisions), and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (build order). Per-phase
 specs live in [`prd/`](prd/).
 
-> **Status: Phase 0 (scaffold).** This is the toolchain and the empty package tree — no
-> domain logic yet. Composition/IR types arrive in Phase 1.
+> **Status: Phase 2 (host-only render path).** The Python↔Remotion↔IR seam is proven on the
+> simplest case: a host recording → a single `full`-scene Composition → neutral IR → an mp4 of
+> the talking head. Captions (the MVP) arrive in Phase 3.
 
 ## Layout
 
@@ -47,3 +48,22 @@ uv run ruff check    # lint
 uv run mypy          # type check
 uv run pytest        # test
 ```
+
+## Render path (Phase 2)
+
+A Composition compiles to a backend-agnostic **IR** (`kernel/compile_ir.py`), and the
+`RemotionBackend` (`backends/remotion/`) shells out to the co-located Node/Remotion app
+(`backends/remotion/project/`), passing the IR as `--props` JSON, to produce an mp4 or a single
+still. The backend dispatches on the IR's three layer kinds (`media`/`audio`/`text`), never on
+overlay types — the only Remotion code lives in `project/` (ADR 0002).
+
+Running the render path needs `ffmpeg`/`ffprobe` on `PATH` and the Node deps installed (see
+Setup). The render integration tests (`tests/test_render_path.py`, marked `integration`) generate
+a fixture host clip, render it, and assert the output exists, its duration ≈ the host length, and
+sampled frames are non-black. They skip automatically if the toolchain is absent. Run only the
+fast unit + snapshot tests with:
+
+```sh
+uv run pytest -m "not integration"
+```
+

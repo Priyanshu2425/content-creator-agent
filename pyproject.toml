@@ -54,3 +54,6 @@ exclude = ['(^|/)node_modules/', 'backends/remotion/project/']
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "integration: end-to-end render path; needs ffmpeg + installed Remotion node deps",
+]
