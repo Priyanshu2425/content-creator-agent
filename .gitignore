@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Node (Remotion project)
+node_modules/
+
+# Render artifacts / output
+renders/
+out/
+
+# OS
+.DS_Store
+
+# Local agent tooling (skills are reproducible via skills-lock.json)
+.claude/commands/
+.claude/settings.local.json
+.agents/skills/
