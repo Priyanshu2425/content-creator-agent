@@ -14,7 +14,8 @@ illegality* and *authoring smell* (ADR 0004):
 The Composition carries no duration of its own; the voiceover (master clock, ADR 0005) sets it, so
 callers pass the probed ``duration`` in -- the same fact ``compile_ir`` consumes. This module is
 pure kernel: it reads the Phase 1 contract types and depends on no service or backend (ADR 0003).
-The ``full``/``split-h`` region map is hard-coded here; Phase 5's layout registry replaces it.
+The Region slots a Layout exposes -- and its preset-parameter validity -- come from the Phase 5
+plugin registry, the single source of truth ``compile_ir`` also drives (ADR 0001, ADR 0002).
 """
 
 from __future__ import annotations
@@ -24,16 +25,11 @@ from enum import StrEnum
 
 from videogen.kernel.composition import (
     Composition,
-    LayoutName,
+    InsertOverlay,
     Overlay,
     RegionName,
 )
-
-# Which Regions each built-in Layout exposes (CONTEXT.md). Phase 5's registry supersedes this.
-_LAYOUT_REGIONS: dict[LayoutName, frozenset[RegionName]] = {
-    LayoutName.full: frozenset({RegionName.full}),
-    LayoutName.split_h: frozenset({RegionName.top, RegionName.bottom}),
-}
+from videogen.kernel.registry import get_layout, get_overlay, layout_regions
 
 
 class ErrorCode(StrEnum):
@@ -43,8 +39,11 @@ class ErrorCode(StrEnum):
     SCENE_TIME_ORDER = "scene_time_order"
     SCENE_OUT_OF_BOUNDS = "scene_out_of_bounds"
     REGION_NOT_IN_LAYOUT = "region_not_in_layout"
+    LAYOUT_PARAM_INVALID = "layout_param_invalid"
     TARGET_REGION_INVALID = "target_region_invalid"
+    OVERLAY_PARAM_INVALID = "overlay_param_invalid"
     DANGLING_ASSET = "dangling_asset"
+    DANGLING_TRANSITION = "dangling_transition"
     CAPTION_TIME_ORDER = "caption_time_order"
     CAPTION_OUT_OF_BOUNDS = "caption_out_of_bounds"
     OVERLAY_TIME_ORDER = "overlay_time_order"
@@ -134,7 +133,8 @@ def validate_local(composition: Composition, *, duration: float) -> list[LocalEr
                     scene.id,
                 )
             )
-        exposed = _LAYOUT_REGIONS.get(scene.layout, frozenset())
+        contract = get_layout(scene.layout)
+        exposed = contract.regions if contract is not None else frozenset()
         for region, ref in scene.regions.items():
             if region not in exposed:
                 errors.append(
@@ -153,6 +153,11 @@ def validate_local(composition: Composition, *, duration: float) -> list[LocalEr
                         scene.id,
                     )
                 )
+        # The Layout's contract owns its preset-parameter validity (e.g. split-h's ratio range), so
+        # a malformed split is caught at authoring time, not as a bad frame (story 31).
+        if contract is not None:
+            for message in contract.validate_params(scene):
+                errors.append(LocalError(ErrorCode.LAYOUT_PARAM_INVALID, message, scene.id))
 
     # Scene non-overlap on the base layer. Sweep by start time tracking the running max end; any
     # scene starting before that maximum overlaps an earlier one (catches containment, not just
@@ -205,9 +210,36 @@ def validate_local(composition: Composition, *, duration: float) -> list[LocalEr
             errors.append(
                 LocalError(
                     ErrorCode.TARGET_REGION_INVALID,
-                    f"overlay {index} targets region '{overlay.target.value}', not exposed by any "
-                    f"scene active during its span",
+                    f"overlay {index} targets region '{overlay.target.value}', not exposed for its "
+                    f"whole span by an active scene",
                     entity,
+                )
+            )
+        # An insert paints its own media, so its Reference must resolve like a scene's (story 3).
+        if isinstance(overlay, InsertOverlay) and overlay.asset not in assets:
+            errors.append(
+                LocalError(
+                    ErrorCode.DANGLING_ASSET,
+                    f"overlay {index} (insert) references undeclared asset '{overlay.asset}'",
+                    entity,
+                )
+            )
+        # The type-specific half of two-phase validation: registry[type] vets the params (story 9).
+        overlay_contract = get_overlay(overlay.type)
+        if overlay_contract is not None:
+            for message in overlay_contract.validate_params(overlay):
+                errors.append(LocalError(ErrorCode.OVERLAY_PARAM_INVALID, message, entity))
+
+    # Transitions are sparse and keyed by the stable Scene id they follow (ADR 0001). A transition
+    # naming a Scene that does not exist is dangling and must never reach the backend (story 32).
+    scene_ids = {scene.id for scene in composition.scenes}
+    for transition in composition.transitions:
+        if transition.after_scene not in scene_ids:
+            errors.append(
+                LocalError(
+                    ErrorCode.DANGLING_TRANSITION,
+                    f"transition follows scene '{transition.after_scene}', which does not exist",
+                    transition.after_scene,
                 )
             )
 
@@ -217,15 +249,23 @@ def validate_local(composition: Composition, *, duration: float) -> list[LocalEr
 def _target_exposed(composition: Composition, overlay: Overlay) -> bool:
     """A non-``full`` target is valid only while a scene exposing it is active (CONTEXT.md).
 
-    Conservative seam for Phase 4: true iff at least one scene overlapping the overlay's span
-    exposes the target region. Overlay *types* and the full per-instant check arrive in Phase 6.
+    Phase 6 makes this a *whole-span* check: every instant of the overlay's span must be covered by
+    a scene that exposes the target region. The exposing scenes' spans (clipped to the overlay) are
+    swept in time order; any hole -- a gap, or a covering scene whose layout lacks the region --
+    fails. Scenes do not overlap (a separate local error), so the clipped spans are disjoint.
     """
-    for scene in composition.scenes:
-        if _overlaps(overlay.start, overlay.end, scene.start, scene.end) and (
-            overlay.target in _LAYOUT_REGIONS.get(scene.layout, frozenset())
-        ):
-            return True
-    return False
+    spans = sorted(
+        (max(overlay.start, scene.start), min(overlay.end, scene.end))
+        for scene in composition.scenes
+        if overlay.target in layout_regions(scene.layout)
+        and _overlaps(overlay.start, overlay.end, scene.start, scene.end)
+    )
+    cursor = overlay.start
+    for start, end in spans:
+        if start > cursor:
+            return False  # a hole before this exposing span: the region is absent there
+        cursor = max(cursor, end)
+    return cursor >= overlay.end
 
 
 def validate_global(composition: Composition, *, duration: float) -> list[GlobalWarning]:

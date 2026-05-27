@@ -14,8 +14,11 @@ from videogen.kernel.composition import (
     Asset,
     AssetType,
     CaptionStyle,
+    InsertOverlay,
     LayoutName,
     RegionName,
+    TransitionKind,
+    ZoomOverlay,
 )
 from videogen.kernel.validator import ErrorCode, GlobalWarning, LocalError, WarningCode
 from videogen.services.media import Transcript, Word
@@ -148,6 +151,63 @@ def test_fill_region_dangling_asset_is_rejected() -> None:
     assert ErrorCode.DANGLING_ASSET in _codes(result.errors)
 
 
+# --- layouts: split-h with a ratio param (Phase 5) ---
+
+
+def test_add_scene_stores_layout_params() -> None:
+    b = _builder()
+    result = b.add_scene(LayoutName.split_h, 0.0, DURATION, id="s0", layout_params={"ratio": 0.7})
+    assert result.ok
+    scene = b.get_scene("s0")
+    assert scene is not None
+    assert scene.layout_params == {"ratio": 0.7}
+
+
+def test_add_scene_with_out_of_range_ratio_is_rejected() -> None:
+    # The split-h contract's ratio validity is enforced through the Builder's per-op validation.
+    b = _builder()
+    result = b.add_scene(LayoutName.split_h, 0.0, DURATION, id="s0", layout_params={"ratio": 1.5})
+    assert not result.ok
+    assert ErrorCode.LAYOUT_PARAM_INVALID in _codes(result.errors)
+    assert b.composition.scenes == []  # transactional: nothing committed
+
+
+def test_author_a_split_h_hook_filling_top_and_bottom() -> None:
+    b = _builder()
+    b.add_scene(LayoutName.split_h, 0.0, DURATION, id="hook", layout_params={"ratio": 0.6})
+    assert b.fill_region("hook", RegionName.top, "host").ok
+    assert b.fill_region("hook", RegionName.bottom, "broll").ok
+    assert b.can_submit_render()
+
+
+# --- transitions: sparse, keyed by afterScene (Phase 5) ---
+
+
+def test_add_transition_after_a_known_scene_commits() -> None:
+    b = _builder()
+    b.add_scene(LayoutName.full, 0.0, 5.0, id="a")
+    b.fill_region("a", RegionName.full, "host")
+    b.add_scene(LayoutName.full, 5.0, DURATION, id="b")
+    b.fill_region("b", RegionName.full, "broll")
+    result = b.add_transition("a", TransitionKind.crossfade, duration=0.5)
+    assert result.ok
+    assert result.entity_ref == "a"
+    transitions = b.composition.transitions
+    assert len(transitions) == 1
+    assert transitions[0].after_scene == "a"
+    assert transitions[0].kind is TransitionKind.crossfade
+
+
+def test_add_transition_naming_an_unknown_scene_is_rejected() -> None:
+    b = _builder()
+    b.add_scene(LayoutName.full, 0.0, DURATION, id="a")
+    b.fill_region("a", RegionName.full, "host")
+    result = b.add_transition("ghost", TransitionKind.crossfade)
+    assert not result.ok
+    assert ErrorCode.DANGLING_TRANSITION in _codes(result.errors)
+    assert b.composition.transitions == []  # transactional: nothing committed
+
+
 def test_overlapping_scene_op_is_rejected_and_first_scene_survives() -> None:
     b = _builder()
     b.add_scene(LayoutName.full, 0.0, 6.0, id="a")
@@ -266,3 +326,44 @@ def test_validate_runs_over_the_whole_document_on_demand() -> None:
     b.fill_region("s0", RegionName.full, "host")
     assert b.validate().ok
     assert b.can_submit_render()
+
+
+# --- effect overlays through the shared addOverlay envelope (Phase 6, stories 8, 9) ---
+
+
+def _host_builder() -> Builder:
+    b = _builder()
+    b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
+    b.fill_region("s0", RegionName.full, "host")
+    return b
+
+
+def test_add_overlay_commits_a_valid_effect() -> None:
+    b = _host_builder()
+    result = b.add_overlay(ZoomOverlay(start=1.0, end=3.0, target=RegionName.full))
+    assert result.ok
+    assert len(b.composition.overlays) == 1
+    assert b.composition.overlays[0].type == "zoom"
+
+
+def test_add_overlay_validates_params_and_rolls_back_a_bad_value() -> None:
+    b = _host_builder()
+    result = b.add_overlay(ZoomOverlay(start=1.0, end=3.0, target=RegionName.full, from_scale=-1.0))
+    assert not result.ok
+    assert ErrorCode.OVERLAY_PARAM_INVALID in _codes(result.errors)
+    assert b.composition.overlays == []  # transactional: a rejected op commits nothing
+
+
+def test_add_overlay_rejects_a_target_region_not_exposed() -> None:
+    b = _host_builder()  # a `full` layout never exposes `top`
+    result = b.add_overlay(InsertOverlay(start=1.0, end=2.0, target=RegionName.top, asset="broll"))
+    assert not result.ok
+    assert ErrorCode.TARGET_REGION_INVALID in _codes(result.errors)
+    assert b.composition.overlays == []
+
+
+def test_add_overlay_rejects_a_dangling_insert_asset() -> None:
+    b = _host_builder()
+    result = b.add_overlay(InsertOverlay(start=1.0, end=2.0, target=RegionName.full, asset="ghost"))
+    assert not result.ok
+    assert ErrorCode.DANGLING_ASSET in _codes(result.errors)

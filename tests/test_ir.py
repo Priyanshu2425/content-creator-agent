@@ -12,6 +12,7 @@ from videogen.kernel.ir import (
     Keyframe,
     Layer,
     MediaLayer,
+    Rect,
     TextLayer,
     TextRun,
     TextStyle,
@@ -84,6 +85,31 @@ def test_default_opacity_is_constant_one() -> None:
 def test_media_in_point_serializes_under_glossary_key() -> None:
     layer = MediaLayer(start=0.0, end=1.0, src="a.mp4", in_point=2.5)
     assert layer.model_dump(by_alias=True)["in"] == 2.5
+
+
+# --- media geometry (Rect) ---
+
+
+def test_media_rect_defaults_to_none_full_frame() -> None:
+    # No rect => the backend fills the whole frame (the host/full-frame case, unchanged).
+    layer = MediaLayer(start=0.0, end=1.0, src="a.mp4")
+    assert layer.rect is None
+
+
+def test_media_rect_carries_normalized_geometry() -> None:
+    # split-h top half: a normalized [0,1] sub-rect of the frame, owned by the layout preset.
+    layer = MediaLayer(
+        start=0.0, end=1.0, src="a.mp4", rect=Rect(x=0.0, y=0.0, width=1.0, height=0.5)
+    )
+    assert layer.rect == Rect(x=0.0, y=0.0, width=1.0, height=0.5)
+    assert_json_roundtrip(layer)
+
+
+def test_rect_rejects_fractions_outside_unit_range() -> None:
+    with pytest.raises(ValidationError):
+        Rect.model_validate({"x": 0.0, "y": 0.0, "width": 1.5, "height": 0.5})
+    with pytest.raises(ValidationError):
+        Rect.model_validate({"x": -0.1, "y": 0.0, "width": 1.0, "height": 0.5})
 
 
 # --- validation ---

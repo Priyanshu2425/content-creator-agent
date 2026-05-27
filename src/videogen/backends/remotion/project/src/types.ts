@@ -47,10 +47,21 @@ interface LayerBase {
   transform?: Transform | null;
 }
 
+// A media layer's destination box, as normalized [0,1] fractions of the frame. The layout preset
+// owns this geometry (split-h regions); absent/null means the whole frame.
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface MediaLayer extends LayerBase {
   kind: "media";
   src: string; // staticFile name (Python stages the asset into the public dir)
-  in?: number | null; // source in-point; null this phase
+  content: "video" | "image"; // paint as a clip or a still
+  in?: number | null; // source in-point
+  rect?: Rect | null; // destination box; null = full frame
 }
 
 export interface TextLayer extends LayerBase {

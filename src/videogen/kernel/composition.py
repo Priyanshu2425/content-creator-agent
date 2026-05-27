@@ -44,6 +44,16 @@ class CaptionStyle(StrEnum):
     kinetic = "kinetic"
 
 
+class Anchor(StrEnum):
+    """Where an `insert` card sits on the frame, by intent rather than raw pixels (CONTEXT.md)."""
+
+    top_left = "top-left"
+    top_right = "top-right"
+    bottom_left = "bottom-left"
+    bottom_right = "bottom-right"
+    center = "center"  # type: ignore[assignment]  # member name shadows str.center
+
+
 class TransitionKind(StrEnum):
     """Non-cut boundaries only; a cut is the default and is never authored."""
 
@@ -86,13 +96,19 @@ class Audio(_Model):
 
 
 class Scene(_Model):
-    """Owns the base layer for a contiguous span; picks one Layout, fills each Region."""
+    """Owns the base layer for a contiguous span; picks one Layout, fills each Region.
+
+    ``layout_params`` carries the chosen Layout's named preset parameters (e.g. ``split-h``'s
+    ``ratio``) -- never free-form geometry (ADR 0001). The Layout's registry contract owns what the
+    keys mean and validates them; an unknown Layout adds keys without a schema change.
+    """
 
     id: str
     start: float = Field(ge=0)
     end: float = Field(ge=0)
     layout: LayoutName
     regions: dict[RegionName, Ref] = Field(default_factory=dict)
+    layout_params: dict[str, float] = Field(default_factory=dict)
 
 
 class Transition(_Model):
@@ -128,15 +144,44 @@ class AdditiveOverlay(_Overlay):
 
 
 class ZoomOverlay(TransformOverlay):
+    """Slow zoom on the target region: scale interpolates ``from_scale -> to_scale`` over the span.
+
+    The numeric ranges are validated by the zoom plugin's registry contract (the type-specific half
+    of the two-phase split, CONTEXT.md "Envelope"), not by the fixed envelope schema.
+    """
+
     type: Literal["zoom"] = "zoom"
+    from_scale: float = 1.0  # scale at the overlay's start
+    to_scale: float = 1.2  # scale at the overlay's end
 
 
 class PanOverlay(TransformOverlay):
+    """Pan across the target region: translate moves from origin to ``(dx, dy)`` over the span.
+
+    ``dx``/``dy`` are signed fractions of the frame, resolved to pixels by the compiler; their range
+    is validated by the pan plugin's registry contract.
+    """
+
     type: Literal["pan"] = "pan"
+    dx: float = 0.1  # horizontal end-offset, fraction of frame
+    dy: float = 0.0  # vertical end-offset, fraction of frame
 
 
 class InsertOverlay(AdditiveOverlay):
+    """Floating b-roll card painted over a continuing scene, placed by ``anchor`` + ``scale``.
+
+    Carries its own ``asset`` Reference (unlike a transform overlay, which acts on existing base
+    content), an optional source ``in``-point, and an optional ``fade`` (seconds) for an opacity
+    ramp in and out. ``scale``/``fade`` ranges are validated by the insert plugin's registry
+    contract; ``asset`` presence is checked by the Validator's dangling-reference pass.
+    """
+
     type: Literal["insert"] = "insert"
+    asset: AssetId  # required: the media painted as the card
+    anchor: Anchor = Anchor.top_right
+    scale: float = 0.3  # card width as a fraction of the frame width
+    in_point: float | None = Field(default=None, alias="in", ge=0)
+    fade: float = 0.0  # opacity ramp in/out, seconds
 
 
 # Adding an action = adding a member here (registry-driven in Phase 5); the Envelope is fixed.

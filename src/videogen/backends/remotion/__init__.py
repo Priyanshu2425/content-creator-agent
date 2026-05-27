@@ -30,6 +30,11 @@ class RemotionBackend:
     ENTRY = "src/index.ts"
     COMPOSITION_ID = "Main"
 
+    # The IR layer kinds the Node interpreter (project/src/Main.tsx) dispatches on. The registry
+    # completeness check (tests/test_registry.py) asserts no registered plugin emits a kind outside
+    # this set, so plugin/backend drift fails the build rather than the render (ADR 0002).
+    HANDLED_KINDS = frozenset({"media", "text", "audio"})
+
     def __init__(self, project_dir: Path | None = None) -> None:
         self.project_dir = project_dir or self.PROJECT_DIR
 

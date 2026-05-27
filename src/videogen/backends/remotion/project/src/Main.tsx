@@ -1,12 +1,14 @@
-// The IR interpreter. Dispatches on each layer's `kind` -- never on overlay type or caption style --
-// so this stays the single place Remotion code lives (ADR 0002). It understands `media` (full-frame
-// host video), `audio` (the voiceover, muxed onto the output), and `text` (captions: paints the
-// compiled visual props and animates the opacity/scale tracks through the shared keyframe sampler).
+// The IR interpreter. Dispatches on each layer's `kind` -- never on overlay type, caption style, or
+// layout name -- so this stays the single place Remotion code lives (ADR 0002). It understands
+// `media` (a video clip or an image still, placed full-frame or in a normalized sub-rect), `audio`
+// (the voiceover, muxed onto the output), and `text` (captions: paints the compiled visual props
+// and animates the opacity/scale tracks through the shared keyframe sampler).
 
 import React from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   OffthreadVideo,
   Sequence,
   staticFile,
@@ -14,7 +16,22 @@ import {
   useVideoConfig,
 } from "remotion";
 import { sample } from "./sampler";
-import type { AudioLayer, Layer, MainProps, MediaLayer, TextLayer } from "./types";
+import type { AudioLayer, Layer, MainProps, MediaLayer, Rect, TextLayer } from "./types";
+
+// A normalized rect becomes a positioned box; its absence fills the frame. Geometry is generic --
+// the backend never knows which layout produced it.
+function boxStyle(rect: Rect | null | undefined): React.CSSProperties {
+  if (!rect) {
+    return { position: "absolute", inset: 0 };
+  }
+  return {
+    position: "absolute",
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.width * 100}%`,
+    height: `${rect.height * 100}%`,
+  };
+}
 
 const MediaLayerView: React.FC<{ layer: MediaLayer; from: number }> = ({ layer, from }) => {
   const { fps } = useVideoConfig();
@@ -23,13 +40,23 @@ const MediaLayerView: React.FC<{ layer: MediaLayer; from: number }> = ({ layer, 
   const scale = sample(layer.transform?.scale, frame, fps, 1);
   const tx = sample(layer.transform?.translate_x, frame, fps, 0);
   const ty = sample(layer.transform?.translate_y, frame, fps, 0);
+  const fill: React.CSSProperties = { width: "100%", height: "100%", objectFit: "cover" };
+  const src = staticFile(layer.src);
   return (
-    <AbsoluteFill style={{ opacity, transform: `translate(${tx}px, ${ty}px) scale(${scale})` }}>
-      <OffthreadVideo
-        src={staticFile(layer.src)}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-    </AbsoluteFill>
+    <div
+      style={{
+        ...boxStyle(layer.rect),
+        opacity,
+        transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+        overflow: "hidden",
+      }}
+    >
+      {layer.content === "image" ? (
+        <Img src={src} style={fill} />
+      ) : (
+        <OffthreadVideo src={src} style={fill} />
+      )}
+    </div>
   );
 };
 

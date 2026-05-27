@@ -1,0 +1,126 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "duration": 6.0,
+  "layers": [
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "host.mp4",
+      "content": "video",
+      "in": null,
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 0.6
+      }
+    },
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "tweet.png",
+      "content": "image",
+      "in": null,
+      "rect": {
+        "x": 0.0,
+        "y": 0.6,
+        "width": 1.0,
+        "height": 0.4
+      }
+    },
+    {
+      "start": 2.0,
+      "end": 4.5,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 4.0,
+            "value": 1.0,
+            "easing": "linear"
+          },
+          {
+            "t": 4.5,
+            "value": 0.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "host.mp4",
+      "content": "video",
+      "in": 10.0,
+      "rect": null
+    },
+    {
+      "start": 4.0,
+      "end": 6.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 4.0,
+            "value": 0.0,
+            "easing": "linear"
+          },
+          {
+            "t": 4.5,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "tweet.png",
+      "content": "image",
+      "in": null,
+      "rect": null
+    },
+    {
+      "start": 0.0,
+      "end": 6.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "audio",
+      "src": "vo.m4a",
+      "in": null
+    }
+  ]
+}

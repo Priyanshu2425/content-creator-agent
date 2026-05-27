@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from videogen.kernel.composition import (
+    Anchor,
     Asset,
     AssetType,
     Audio,
@@ -17,6 +18,7 @@ from videogen.kernel.composition import (
     InsertOverlay,
     LayoutName,
     Overlay,
+    PanOverlay,
     Ref,
     RegionName,
     Scene,
@@ -37,7 +39,7 @@ def make_composition() -> Composition:
     """A representative document exercising the decision-bearing shapes."""
     overlays: list[Overlay] = [
         ZoomOverlay(start=3.0, end=6.0, target=RegionName.full, z=0),  # transform
-        InsertOverlay(start=4.0, end=5.0, target=RegionName.full, z=10),  # additive
+        InsertOverlay(start=4.0, end=5.0, target=RegionName.full, z=10, asset="tweet"),  # additive
     ]
     return Composition(
         version=1,
@@ -143,6 +145,41 @@ def test_extra_field_rejected() -> None:
 def test_ref_requires_asset() -> None:
     with pytest.raises(ValidationError):
         Ref.model_validate({"in": 1.0})
+
+
+# --- overlay type-specific params (Phase 6): the registry-driven half of the two-phase split ---
+
+
+def test_zoom_carries_scale_params_with_defaults() -> None:
+    # The envelope is fixed; the type-specific params live on the typed overlay member.
+    z = ZoomOverlay(start=0.0, end=2.0)
+    assert (z.from_scale, z.to_scale) == (1.0, 1.2)
+
+
+def test_pan_carries_offset_params_with_defaults() -> None:
+    p = PanOverlay(start=0.0, end=2.0)
+    assert (p.dx, p.dy) == (0.1, 0.0)
+
+
+def test_insert_requires_an_asset() -> None:
+    # A floating insert without media is meaningless: the envelope alone is not a valid insert.
+    with pytest.raises(ValidationError):
+        InsertOverlay.model_validate({"type": "insert", "start": 0.0, "end": 1.0})
+
+
+def test_insert_carries_anchor_scale_and_in_point_under_glossary_keys() -> None:
+    ins = InsertOverlay(
+        start=0.0, end=1.0, asset="tweet", anchor=Anchor.top_right, scale=0.3, in_point=2.0
+    )
+    dumped = ins.model_dump(by_alias=True)
+    assert dumped["asset"] == "tweet"
+    assert dumped["anchor"] == "top-right"
+    assert dumped["scale"] == 0.3
+    assert dumped["in"] == 2.0  # the Reference in-point alias, reused for an insert's source slice
+
+
+def test_insert_anchor_defaults_to_top_right() -> None:
+    assert InsertOverlay(start=0.0, end=1.0, asset="tweet").anchor is Anchor.top_right
 
 
 def test_unknown_layout_rejected() -> None:

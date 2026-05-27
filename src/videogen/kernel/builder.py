@@ -36,9 +36,12 @@ from videogen.kernel.composition import (
     CaptionStyle,
     Composition,
     LayoutName,
+    Overlay,
     Ref,
     RegionName,
     Scene,
+    Transition,
+    TransitionKind,
 )
 from videogen.kernel.validator import (
     ErrorCode,
@@ -132,18 +135,53 @@ class Builder:
     # --- create ---
 
     def add_scene(
-        self, layout: LayoutName, start: float, end: float, *, id: str | None = None
+        self,
+        layout: LayoutName,
+        start: float,
+        end: float,
+        *,
+        id: str | None = None,
+        layout_params: dict[str, float] | None = None,
     ) -> OpResult:
         """Append a Scene to the ordered base layer with ``layout`` and a stable id (assigned if
-        omitted). The new Scene fills no regions yet -- use ``fill_region``."""
+        omitted). ``layout_params`` carries the Layout's preset parameters (e.g. ``split-h``'s
+        ``ratio``), validated by the Layout's contract; an out-of-range value rejects the op. The
+        new Scene fills no regions yet -- use ``fill_region``."""
         sid = id if id is not None else self._next_scene_id()
         if any(scene.id == sid for scene in self._composition.scenes):
             return _reject(ErrorCode.DUPLICATE_SCENE_ID, f"scene id '{sid}' already exists", sid)
-        scene = Scene(id=sid, start=start, end=end, layout=layout, regions={})
+        scene = Scene(
+            id=sid,
+            start=start,
+            end=end,
+            layout=layout,
+            regions={},
+            layout_params=layout_params or {},
+        )
         candidate = self._composition.model_copy(
             update={"scenes": [*self._composition.scenes, scene]}
         )
         return self._commit(candidate, sid)
+
+    def add_transition(
+        self,
+        after_scene: str,
+        kind: TransitionKind = TransitionKind.crossfade,
+        *,
+        duration: float = 0.5,
+    ) -> OpResult:
+        """Add a non-cut Transition to the sparse ``transitions`` array, keyed by the Scene it
+        follows (ADR 0001). A cut is the default boundary and is never authored; this adds only the
+        boundaries that differ. An ``after_scene`` with no matching Scene rejects the op."""
+        if self._scene_index(after_scene) is None:
+            return _reject(
+                ErrorCode.DANGLING_TRANSITION, f"no scene with id '{after_scene}'", after_scene
+            )
+        transition = Transition(after_scene=after_scene, kind=kind, duration=duration)
+        candidate = self._composition.model_copy(
+            update={"transitions": [*self._composition.transitions, transition]}
+        )
+        return self._commit(candidate, after_scene)
 
     def fill_region(
         self, scene_id: str, region: RegionName, asset_id: AssetId, *, in_point: float | None = None
@@ -156,6 +194,18 @@ class Builder:
         new_regions = {**scene.regions, region: Ref(asset=asset_id, in_point=in_point)}
         new_scene = scene.model_copy(update={"regions": new_regions})
         return self._commit(self._with_scene(index, new_scene), scene_id)
+
+    def add_overlay(self, overlay: Overlay) -> OpResult:
+        """Add an effect overlay (zoom/pan/insert) through the shared ``addOverlay`` envelope.
+
+        One generic op for every overlay type (ADR 0001): the caller hands in a fully-typed overlay,
+        so the fixed core schema has already validated the envelope, and the per-op two-phase
+        validation then vets the type-specific params via ``registry[type]`` plus the target-region
+        and asset checks. The op commits only if the candidate has no local errors; a rejection
+        leaves the overlays list untouched (transactional, like every other Builder op)."""
+        overlays = [*self._composition.overlays, overlay]
+        candidate = self._composition.model_copy(update={"overlays": overlays})
+        return self._commit(candidate, f"overlay[{len(overlays) - 1}]")
 
     def add_caption(
         self, text: str, start: float, end: float, style: CaptionStyle = CaptionStyle.pill

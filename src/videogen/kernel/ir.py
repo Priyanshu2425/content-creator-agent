@@ -51,6 +51,20 @@ class Transform(_Model):
     translate_y: Value | None = None
 
 
+class Rect(_Model):
+    """A media layer's destination box, as normalized [0,1] fractions of the frame.
+
+    Geometry is owned by the layout preset (ADR 0001), compiled into this neutral rect so the
+    backend places the media from data without knowing any layout by name. Normalized rather than
+    pixel so it is independent of the IR canvas size. `None` on a layer means the whole frame.
+    """
+
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    width: float = Field(gt=0.0, le=1.0)
+    height: float = Field(gt=0.0, le=1.0)
+
+
 class TextRun(_Model):
     """A span of caption text; `emphasis` marks the word-bold / kinetic key word."""
 
@@ -93,7 +107,9 @@ class _Layer(_Model):
 class MediaLayer(_Layer):
     kind: Literal["media"] = "media"
     src: str  # resolved media path/source
+    content: Literal["video", "image"] = "video"  # how the backend paints it (clip vs still)
     in_point: float | None = Field(default=None, alias="in", ge=0)
+    rect: Rect | None = None  # destination box (normalized); None = full frame
 
 
 class TextLayer(_Layer):

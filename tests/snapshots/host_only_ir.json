@@ -20,7 +20,9 @@
       "transform": null,
       "kind": "media",
       "src": "host.mp4",
-      "in": null
+      "content": "video",
+      "in": null,
+      "rect": null
     },
     {
       "start": 0.0,

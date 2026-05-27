@@ -110,7 +110,7 @@ def test_active_captions_and_overlays_are_reported_in_paint_order() -> None:
             Caption(text="low", start=0.0, end=2.0, style=CaptionStyle.pill, z=50),
             Caption(text="high", start=0.0, end=2.0, style=CaptionStyle.kinetic, z=100),
         ],
-        overlays=[InsertOverlay(start=0.0, end=2.0, target=RegionName.full, z=10)],
+        overlays=[InsertOverlay(start=0.0, end=2.0, target=RegionName.full, z=10, asset="broll")],
     )
     frame = resolve(comp, 1.0)
     assert {c.text for c in frame.captions} == {"low", "high"}
@@ -184,3 +184,25 @@ def test_timeline_marks_a_trailing_black_tail() -> None:
     comp = _comp(scenes=[_full_scene("s0", 0.0, 6.0)])
     text = timeline(comp, duration=DURATION)
     assert "gap" in text.lower()  # trailing [6, 10] black tail is shown
+
+
+def test_timeline_lists_effect_overlays_with_their_target_region() -> None:
+    # The agent reasons about an effect from the timeline without rendering (ADR 0004, story 12).
+    comp = _comp(
+        scenes=[_full_scene("s0", 0.0, DURATION)],
+        overlays=[ZoomOverlay(start=1.0, end=3.0, target=RegionName.full, z=5)],
+    )
+    text = timeline(comp, duration=DURATION)
+    assert "zoom" in text  # the effect is named
+    assert "full" in text  # against its target region
+    assert "transform" in text  # classified as a transform (not painted)
+
+
+def test_resolve_reports_an_active_effects_type_and_target() -> None:
+    comp = _comp(
+        scenes=[_full_scene("s0", 0.0, DURATION)],
+        overlays=[ZoomOverlay(start=0.0, end=2.0, target=RegionName.full, z=5)],
+    )
+    active = resolve(comp, 1.0).overlays
+    assert len(active) == 1
+    assert active[0].type == "zoom" and active[0].target == RegionName.full

@@ -22,6 +22,9 @@ from videogen.kernel.composition import (
     Ref,
     RegionName,
     Scene,
+    Transition,
+    TransitionKind,
+    ZoomOverlay,
 )
 from videogen.kernel.validator import (
     ErrorCode,
@@ -48,6 +51,7 @@ def _comp(
     scenes: list[Scene] | None = None,
     captions: list[Caption] | None = None,
     overlays: list[Overlay] | None = None,
+    transitions: list[Transition] | None = None,
     assets: dict[str, Asset] | None = None,
     voiceover: str = "vo",
 ) -> Composition:
@@ -57,6 +61,7 @@ def _comp(
         scenes=scenes or [],
         captions=captions or [],
         overlays=overlays or [],
+        transitions=transitions or [],
     )
 
 
@@ -107,6 +112,52 @@ def test_split_h_regions_are_valid() -> None:
     assert validate_local(comp, duration=DURATION) == []
 
 
+# --- layout params: split-h ratio (validated by the registry contract, story 31) ---
+
+
+def _split_scene(ratio: float) -> Scene:
+    return Scene(
+        id="s0",
+        start=0.0,
+        end=DURATION,
+        layout=LayoutName.split_h,
+        regions={RegionName.top: Ref(asset="host"), RegionName.bottom: Ref(asset="broll")},
+        layout_params={"ratio": ratio},
+    )
+
+
+def test_split_h_ratio_out_of_range_is_a_hard_error() -> None:
+    comp = _comp(scenes=[_split_scene(1.5)])
+    assert ErrorCode.LAYOUT_PARAM_INVALID in _codes(validate_local(comp, duration=DURATION))
+
+
+def test_split_h_in_range_ratio_is_clean() -> None:
+    comp = _comp(scenes=[_split_scene(0.65)])
+    assert validate_local(comp, duration=DURATION) == []
+
+
+# --- transitions: sparse, keyed by afterScene (stories 18, 32) ---
+
+
+def test_transition_after_a_known_scene_is_clean() -> None:
+    comp = _comp(
+        scenes=[_scene("a", 0.0, 5.0), _scene("b", 5.0, DURATION)],
+        transitions=[Transition(after_scene="a", kind=TransitionKind.crossfade)],
+    )
+    assert validate_local(comp, duration=DURATION) == []
+
+
+def test_transition_naming_an_unknown_scene_is_rejected() -> None:
+    # A dangling afterScene must never reach the backend (story 32).
+    comp = _comp(
+        scenes=[_scene("a", 0.0, DURATION)],
+        transitions=[Transition(after_scene="ghost", kind=TransitionKind.crossfade)],
+    )
+    errors = validate_local(comp, duration=DURATION)
+    assert ErrorCode.DANGLING_TRANSITION in _codes(errors)
+    assert any(e.entity_ref == "ghost" for e in errors)
+
+
 # --- local hard errors ---
 
 
@@ -124,9 +175,7 @@ def test_touching_scenes_do_not_overlap() -> None:
 
 def test_region_not_exposed_by_layout_is_an_error() -> None:
     # A `full` layout exposes only `full`; filling `top` is illegal.
-    comp = _comp(
-        scenes=[_scene("s0", 0.0, DURATION, regions={RegionName.top: Ref(asset="host")})]
-    )
+    comp = _comp(scenes=[_scene("s0", 0.0, DURATION, regions={RegionName.top: Ref(asset="host")})])
     errors = validate_local(comp, duration=DURATION)
     assert ErrorCode.REGION_NOT_IN_LAYOUT in _codes(errors)
     assert any(e.entity_ref == "s0" for e in errors)
@@ -171,7 +220,7 @@ def test_overlay_target_region_not_exposed_is_an_error() -> None:
     # `insert` over `top`, but every scene is `full`, which never exposes `top`.
     comp = _comp(
         scenes=[_scene("s0", 0.0, DURATION)],
-        overlays=[InsertOverlay(start=1.0, end=2.0, target=RegionName.top, z=10)],
+        overlays=[InsertOverlay(start=1.0, end=2.0, target=RegionName.top, z=10, asset="broll")],
     )
     assert ErrorCode.TARGET_REGION_INVALID in _codes(validate_local(comp, duration=DURATION))
 
@@ -190,9 +239,77 @@ def test_overlay_target_region_exposed_by_active_scene_is_valid() -> None:
                 },
             )
         ],
-        overlays=[InsertOverlay(start=1.0, end=2.0, target=RegionName.top, z=10)],
+        overlays=[InsertOverlay(start=1.0, end=2.0, target=RegionName.top, z=10, asset="broll")],
     )
     assert _codes(validate_local(comp, duration=DURATION)) == set()
+
+
+# --- effect overlays: full-span target validity + insert asset + params (Phase 6) ---
+
+
+def _split(sid: str, start: float, end: float) -> Scene:
+    return _scene(
+        sid,
+        start,
+        end,
+        layout=LayoutName.split_h,
+        regions={RegionName.top: Ref(asset="host"), RegionName.bottom: Ref(asset="broll")},
+    )
+
+
+def test_transform_target_must_be_exposed_across_the_whole_span() -> None:
+    # split-h [0,5] exposes `top`; the full scene [5,10] does not. A `top` zoom crossing the
+    # boundary aims at a region that disappears mid-span -- now caught per-span (Phase 6).
+    comp = _comp(
+        scenes=[_split("hook", 0.0, 5.0), _scene("body", 5.0, 10.0)],
+        overlays=[ZoomOverlay(start=4.0, end=6.0, target=RegionName.top)],
+    )
+    assert ErrorCode.TARGET_REGION_INVALID in _codes(validate_local(comp, duration=DURATION))
+
+
+def test_transform_target_within_an_exposing_scene_is_valid() -> None:
+    comp = _comp(
+        scenes=[_split("hook", 0.0, DURATION)],
+        overlays=[ZoomOverlay(start=2.0, end=4.0, target=RegionName.top)],
+    )
+    assert validate_local(comp, duration=DURATION) == []
+
+
+def test_full_target_is_always_valid_even_over_a_gap() -> None:
+    # `full` is always valid; a zoom may even span into a black gap (it reshapes nothing there).
+    comp = _comp(
+        scenes=[_scene("s0", 0.0, 4.0)],
+        overlays=[ZoomOverlay(start=3.0, end=8.0, target=RegionName.full)],
+    )
+    assert ErrorCode.TARGET_REGION_INVALID not in _codes(validate_local(comp, duration=DURATION))
+
+
+def test_insert_with_a_dangling_asset_is_an_error() -> None:
+    comp = _comp(
+        scenes=[_scene("s0", 0.0, DURATION)],
+        overlays=[InsertOverlay(start=1.0, end=2.0, target=RegionName.full, asset="ghost")],
+    )
+    assert ErrorCode.DANGLING_ASSET in _codes(validate_local(comp, duration=DURATION))
+
+
+def test_overlay_params_are_validated_through_the_registry() -> None:
+    # A bad zoom scale is the type-specific (registry) half of two-phase validation (story 9).
+    comp = _comp(
+        scenes=[_scene("s0", 0.0, DURATION)],
+        overlays=[ZoomOverlay(start=1.0, end=2.0, target=RegionName.full, from_scale=-1.0)],
+    )
+    assert ErrorCode.OVERLAY_PARAM_INVALID in _codes(validate_local(comp, duration=DURATION))
+
+
+def test_a_well_formed_effect_is_clean() -> None:
+    comp = _comp(
+        scenes=[_scene("s0", 0.0, DURATION)],
+        overlays=[
+            ZoomOverlay(start=1.0, end=5.0, target=RegionName.full, to_scale=1.3),
+            InsertOverlay(start=2.0, end=4.0, target=RegionName.full, asset="broll", scale=0.3),
+        ],
+    )
+    assert validate_local(comp, duration=DURATION) == []
 
 
 # --- global reported warnings (gaps) ---

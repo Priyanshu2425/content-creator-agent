@@ -1,0 +1,135 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "duration": 4.0,
+  "layers": [
+    {
+      "start": 0.0,
+      "end": 4.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": {
+        "scale": {
+          "keyframes": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "easing": "linear"
+            },
+            {
+              "t": 4.0,
+              "value": 1.2,
+              "easing": "ease_in_out"
+            }
+          ]
+        },
+        "translate_x": null,
+        "translate_y": null
+      },
+      "kind": "media",
+      "src": "host.mp4",
+      "content": "video",
+      "in": null,
+      "rect": null
+    },
+    {
+      "start": 0.0,
+      "end": 4.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "audio",
+      "src": "vo.m4a",
+      "in": null
+    },
+    {
+      "start": 0.5,
+      "end": 2.0,
+      "z": 100,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "text",
+      "runs": [
+        {
+          "text": "watch this",
+          "emphasis": false
+        }
+      ],
+      "style": "pill",
+      "props": {
+        "font_size": 64,
+        "font_weight": 700,
+        "color": "#FFFFFF",
+        "background": "rgba(17,24,39,0.85)",
+        "border_radius": 24,
+        "padding_x": 40,
+        "padding_y": 18
+      }
+    },
+    {
+      "start": 1.0,
+      "end": 3.0,
+      "z": 50,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 1.0,
+            "value": 0.0,
+            "easing": "linear"
+          },
+          {
+            "t": 1.4,
+            "value": 1.0,
+            "easing": "ease_out"
+          },
+          {
+            "t": 2.6,
+            "value": 1.0,
+            "easing": "linear"
+          },
+          {
+            "t": 3.0,
+            "value": 0.0,
+            "easing": "ease_in"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "tweet.png",
+      "content": "image",
+      "in": null,
+      "rect": {
+        "x": 0.6599999999999999,
+        "y": 0.04,
+        "width": 0.3,
+        "height": 0.16874999999999998
+      }
+    }
+  ]
+}
