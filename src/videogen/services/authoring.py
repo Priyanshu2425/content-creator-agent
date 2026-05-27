@@ -5,38 +5,52 @@ and returns a finished, validated Composition ready for RenderService. It seeds 
 manifest's facts -- the voiceover master clock, the declared assets -- opens a CompositionStore for
 the audit trail, and runs the authoring loop to drive the model through validated Builder ops.
 
-Per ADR 0003 the service depends only on the shared kernel and the ``agent`` module; its one
-render-adjacent dependency is a ``RenderBackend`` *handle*, used solely for the loop's in-loop
-vision (``render_still``) -- it never imports a concrete render engine or RenderService. The model
-is injected as a ``ModelClient`` (the swappable seam), so authoring quality vs cost is the caller's
-choice without touching this service.
+When a video-capable ``ReviewAgent`` and a ``VideoRenderer`` are supplied, the service then runs the
+Phase 8b finalization gate: the first-pass Composition is rendered to a full mp4, watched in motion,
+and corrected through the *same* authoring loop, bounded by a round cap. Without them it behaves
+exactly as Phase 8 -- a first valid pass with no full-motion review.
+
+Per ADR 0003 the service depends only on the shared kernel and the ``agent``/finalization modules;
+its one render-adjacent dependency is a ``RenderBackend`` *handle* (for the loop's in-loop
+``render_still`` vision) plus an injected ``VideoRenderer`` seam -- it never imports a concrete
+render engine or RenderService. The authoring model and the reviewer are both injected, so quality
+vs. cost is the caller's choice without touching this service.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from videogen.agent.loop import AuthoringLoop
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import Manifest
 from videogen.agent.prompts import SYSTEM_PROMPT
+from videogen.agent.review import ReviewAgent
 from videogen.backends.base import RenderBackend
 from videogen.kernel.builder import Builder
 from videogen.kernel.composition import Asset, AssetType, Composition
 from videogen.kernel.validator import ValidationResult
+from videogen.services.finalize import FinalizationGate, FinalizationResult, VideoRenderer
 from videogen.stores.composition_store import CompositionStore, JournalEntry
 
 
 @dataclass(frozen=True)
 class AuthoredComposition:
     """The output of an authoring run: the document, its validation report, how the loop ended,
-    and the append-only audit journal of the ops the agent applied (story 34)."""
+    and the append-only audit journal of the ops the agent applied (story 34).
+
+    When the finalization gate ran, ``video`` is the last reviewed mp4 and ``finalization`` carries
+    the review trajectory; both are ``None`` for a Phase 8 first-pass-only run.
+    """
 
     composition: Composition
     report: ValidationResult
     terminated_clean: bool
     ops_used: int
     journal: tuple[JournalEntry, ...]
+    video: Path | None = None
+    finalization: FinalizationResult | None = None
 
 
 class AuthoringService:
@@ -51,7 +65,10 @@ class AuthoringService:
         brief: str,
         *,
         model_client: ModelClient,
+        reviewer: ReviewAgent | None = None,
+        renderer: VideoRenderer | None = None,
         max_ops: int = 40,
+        max_review_rounds: int = 2,
         system: str = SYSTEM_PROMPT,
     ) -> AuthoredComposition:
         builder = Builder.new(
@@ -73,12 +90,31 @@ class AuthoringService:
             max_ops=max_ops,
         )
         result = loop.run()
+
+        finalization: FinalizationResult | None = None
+        if reviewer is not None and renderer is not None:
+            finalization = FinalizationGate(
+                client=model_client,
+                builder=builder,
+                manifest=manifest,
+                store=store,
+                doc_id=doc_id,
+                reviewer=reviewer,
+                renderer=renderer,
+                backend=self._backend,
+                system=system,
+                max_ops=max_ops,
+                max_rounds=max_review_rounds,
+            ).run()
+
         return AuthoredComposition(
-            composition=result.composition,
-            report=result.report,
+            composition=builder.composition,
+            report=builder.validate(),
             terminated_clean=result.terminated_clean,
             ops_used=result.ops_used,
             journal=store.journal(doc_id),
+            video=finalization.video if finalization else None,
+            finalization=finalization,
         )
 
 

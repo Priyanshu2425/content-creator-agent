@@ -15,7 +15,8 @@ from pathlib import Path
 
 from videogen.agent.model import AssistantTurn, HistoryItem, ToolCall, ToolSpec
 from videogen.agent.perception import AssetFact, MediaManifest
-from videogen.kernel.composition import AssetType
+from videogen.agent.review import ReviewFeedback
+from videogen.kernel.composition import AssetType, Composition
 from videogen.kernel.ir import IR
 from videogen.kernel.validator import can_submit_render
 from videogen.services.authoring import AuthoringService
@@ -106,9 +107,68 @@ def test_author_returns_a_reconstructable_audit_journal() -> None:
     assert [entry.op for entry in result.journal] == ["add_scene", "fill_region"]
 
 
+class _CleanReviewer:
+    def review(self, *, video: Path, composition: Composition, timeline: str) -> ReviewFeedback:
+        return ReviewFeedback(items=(), no_actionable_issues=True)
+
+
+class _FakeRenderer:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.calls = 0
+
+    def render_video(self, composition: Composition, *, fps: int, duration: float) -> Path:
+        self.calls += 1
+        return self.path
+
+
+def test_author_without_a_reviewer_skips_finalization() -> None:
+    client = ScriptedClient(
+        [
+            turn(call("add_scene", layout="full", start=0.0, end=2.0, id="s0")),
+            turn(call("fill_region", scene_id="s0", region="full", asset_id="host")),
+            turn(call("finish")),
+        ]
+    )
+    service = AuthoringService(backend=_NullBackend())
+
+    result = service.author(make_manifest(), "brief", model_client=client)
+
+    assert result.video is None  # Phase 8 behaviour: a first valid pass, no full-motion review
+    assert result.finalization is None
+
+
+def test_author_finalizes_through_the_review_gate_when_a_reviewer_is_supplied(
+    tmp_path: Path,
+) -> None:
+    client = ScriptedClient(
+        [
+            turn(call("add_scene", layout="full", start=0.0, end=2.0, id="s0")),
+            turn(call("fill_region", scene_id="s0", region="full", asset_id="host")),
+            turn(call("finish")),
+        ]
+    )
+    renderer = _FakeRenderer(tmp_path / "final.mp4")
+    service = AuthoringService(backend=_NullBackend())
+
+    result = service.author(
+        make_manifest(),
+        "brief",
+        model_client=client,
+        reviewer=_CleanReviewer(),
+        renderer=renderer,
+    )
+
+    assert result.video == tmp_path / "final.mp4"  # the reviewed mp4 is the returned artifact
+    assert result.finalization is not None and result.finalization.terminated_clean
+    assert renderer.calls == 1  # a clean first pass renders once and runs no edit rounds
+    # the render and review are journaled after the authoring ops (story 23)
+    assert [e.op for e in result.journal][-2:] == ["render_video", "review"]
+
+
 def test_service_does_not_depend_on_a_concrete_render_engine() -> None:
-    """ADR 0003: AuthoringService depends on the kernel, the agent module, and the backend seam --
-    never on Remotion or RenderService internals."""
+    """ADR 0003: AuthoringService depends on the kernel, the agent/finalization modules, and the
+    backend seam -- never on Remotion or RenderService internals."""
     source = Path("src/videogen/services/authoring.py").read_text()
     assert "backends.remotion" not in source
     assert "services.render" not in source

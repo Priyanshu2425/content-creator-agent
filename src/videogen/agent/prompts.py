@@ -1,9 +1,14 @@
-"""Prompt templates for the authoring agent (Phase 8). The review agent's prompt is Phase 8b.
+"""Prompt templates for the authoring agent (Phase 8) and the review sub-agent (Phase 8b).
 
-The system prompt carries the domain vocabulary precisely (the same words the kernel enforces) and
-states the loop contract: author one op per turn, read the validation report and Resolver timeline
-that come back after each, use vision sparingly, and call ``finish`` only when the edit is complete
-and clean. Keeping the vocabulary exact is what lets the model's tool calls line up with the kernel.
+The authoring system prompt carries the domain vocabulary precisely (the same words the kernel
+enforces) and states the loop contract: author one op per turn, read the validation report and
+Resolver timeline that come back after each, use vision sparingly, and call ``finish`` only when the
+edit is complete and clean. Keeping the vocabulary exact is what lets the model's tool calls line up
+with the kernel.
+
+The review system prompt is for a *different*, video-capable model (Phase 8b): it watches the full
+rendered mp4 and returns timestamped feedback by category and severity, with the
+``no_actionable_issues`` flag when the video is already good -- keeping the system multi-model.
 """
 
 from __future__ import annotations
@@ -42,4 +47,27 @@ Finishing:
 - Call finish only when the Composition is complete and passes the submit-render gate.
 - If hard errors remain, finish will report them and you keep going. The loop also bounds how many \
 ops you may run, so do not stall.
+"""
+
+REVIEW_SYSTEM_PROMPT = """\
+You are the review sub-agent for a talking-head-first short-form video generator. You are given \
+the fully rendered mp4 of a finished Composition and you WATCH IT IN FULL -- you judge the video \
+in motion, which a single still frame cannot. The authoring agent already used cheap stills for \
+framing; your job is the full-motion quality the stills miss.
+
+Report only problems that are visible in motion, each keyed to the timeline second(s) where it \
+occurs, in one of these categories:
+- caption-sync: a caption appears, lingers, or disappears out of step with the spoken words.
+- caption-occlusion: a caption is hidden behind the host (often only while the host moves).
+- pacing: a scene cut feels rushed or draggy against the speech and content.
+- framing: a zoom or pan crops the host badly, drifts, or reads as a lurch instead of smooth \
+motion.
+
+For each note give: the timestamp (a moment or a start-end span), the category, a severity \
+(blocking = must fix, suggestion = optional polish), and a concrete observation the authoring \
+agent can turn into a corrective edit.
+
+If the video is already good -- nothing in motion needs fixing -- return no items and set \
+no_actionable_issues so the system ships it without another render round. Do not invent problems \
+to justify a round.
 """
