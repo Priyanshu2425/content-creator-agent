@@ -95,6 +95,16 @@ class CompositionStore:
             doc.cursor += 1
         return _snapshot(doc.snapshots[doc.cursor])
 
+    def note(self, doc_id: str, *, op: str) -> None:
+        """Append ``op`` to the audit journal without editing the snapshot stack or cursor.
+
+        The journal-only path for events that are part of the authoring trajectory but are not
+        document edits -- a vision request, or an op the validator rejected (ADR 0004, story 34).
+        Undo/redo navigate snapshots and never see these entries; the journal just keeps growing.
+        """
+        doc = self._docs[doc_id]
+        doc.journal.append(JournalEntry(seq=len(doc.journal), op=op))
+
     def journal(self, doc_id: str) -> tuple[JournalEntry, ...]:
         """The append-only, in-order record of ops applied to the document."""
         return tuple(self._docs[doc_id].journal)

@@ -146,6 +146,26 @@ def test_commit_after_undo_still_appends_to_the_journal(comp: Composition) -> No
     assert [e.op for e in store.journal(doc_id)] == ["first", "second"]
 
 
+def test_note_appends_to_the_journal_without_touching_snapshots(comp: Composition) -> None:
+    """A vision request or a rejected op is journaled (story 34) but is not a snapshot edit:
+    ``note`` records the op in order yet leaves ``current``/the undo cursor exactly where it was."""
+    store = CompositionStore()
+    doc_id = store.open(comp)
+    store.commit(doc_id, comp.model_copy(update={"strict": False}), op="set_strict")
+    after_commit = store.current(doc_id)
+
+    store.note(doc_id, op="render_still(t=1.50)")
+    store.note(doc_id, op="add_scene[rejected]")
+
+    assert store.current(doc_id) == after_commit  # current is untouched by a note
+    assert [e.op for e in store.journal(doc_id)] == [
+        "set_strict",
+        "render_still(t=1.50)",
+        "add_scene[rejected]",
+    ]
+    assert store.undo(doc_id) == comp  # undo still navigates snapshots, ignoring the notes
+
+
 # --- file persistence: durable across a process restart (stories 4, 26) ---
 
 
