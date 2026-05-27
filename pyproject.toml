@@ -9,6 +9,12 @@ dependencies = [
     "pydantic>=2.9",
 ]
 
+[project.optional-dependencies]
+# Phase 3 transcription. faster-whisper is a heavy native runtime (ctranslate2) plus a downloaded
+# model, so it is opt-in: ingest/probe/resolve and the whole render path work without it, and
+# `MediaService.transcribe` imports it lazily. Install with `uv sync --extra transcribe`.
+transcribe = ["faster-whisper>=1.0"]
+
 [project.scripts]
 # Reserved now; the command body lands in Phase 9 (see app/cli.py).
 videogen = "videogen.app.cli:main"
@@ -49,6 +55,12 @@ explicit_package_bases = true
 files = ["src", "tests"]
 # Keep the Node project's tooling scoped to its own folder, off the Python type checker.
 exclude = ['(^|/)node_modules/', 'backends/remotion/project/']
+
+# faster-whisper is an optional, unstubbed dependency imported lazily in MediaService.transcribe;
+# don't fail type-checking when the extra isn't installed.
+[[tool.mypy.overrides]]
+module = "faster_whisper.*"
+ignore_missing_imports = true
 
 # --- Test --------------------------------------------------------------------
 [tool.pytest.ini_options]

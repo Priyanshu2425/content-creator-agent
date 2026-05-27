@@ -1,0 +1,162 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "duration": 2.0,
+  "layers": [
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "media",
+      "src": "host.mp4",
+      "in": null
+    },
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "z": 0,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "audio",
+      "src": "host.mp4",
+      "in": null
+    },
+    {
+      "start": 0.2,
+      "end": 0.8,
+      "z": 100,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "text",
+      "runs": [
+        {
+          "text": "hello there",
+          "emphasis": false
+        }
+      ],
+      "style": "pill",
+      "props": {
+        "font_size": 64,
+        "font_weight": 700,
+        "color": "#FFFFFF",
+        "background": "rgba(17,24,39,0.85)",
+        "border_radius": 24,
+        "padding_x": 40,
+        "padding_y": 18
+      }
+    },
+    {
+      "start": 0.9,
+      "end": 1.2,
+      "z": 100,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 0.0,
+            "value": 1.0,
+            "easing": "linear"
+          }
+        ]
+      },
+      "transform": null,
+      "kind": "text",
+      "runs": [
+        {
+          "text": "this",
+          "emphasis": true
+        }
+      ],
+      "style": "word-bold",
+      "props": {
+        "font_size": 76,
+        "font_weight": 800,
+        "color": "#FFFFFF",
+        "background": null,
+        "border_radius": 0,
+        "padding_x": 0,
+        "padding_y": 0
+      }
+    },
+    {
+      "start": 1.3,
+      "end": 1.8,
+      "z": 100,
+      "opacity": {
+        "keyframes": [
+          {
+            "t": 1.3,
+            "value": 0.0,
+            "easing": "linear"
+          },
+          {
+            "t": 1.48,
+            "value": 1.0,
+            "easing": "ease_out"
+          }
+        ]
+      },
+      "transform": {
+        "scale": {
+          "keyframes": [
+            {
+              "t": 1.3,
+              "value": 0.6,
+              "easing": "linear"
+            },
+            {
+              "t": 1.48,
+              "value": 1.0,
+              "easing": "ease_out"
+            }
+          ]
+        },
+        "translate_x": null,
+        "translate_y": null
+      },
+      "kind": "text",
+      "runs": [
+        {
+          "text": "matters",
+          "emphasis": true
+        }
+      ],
+      "style": "kinetic",
+      "props": {
+        "font_size": 120,
+        "font_weight": 900,
+        "color": "#FFE14D",
+        "background": null,
+        "border_radius": 0,
+        "padding_x": 0,
+        "padding_y": 0
+      }
+    }
+  ]
+}

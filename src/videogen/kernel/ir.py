@@ -58,6 +58,25 @@ class TextRun(_Model):
     emphasis: bool = False
 
 
+class TextStyle(_Model):
+    """Visual properties of a caption, baked by the compiler from a caption-style preset.
+
+    The compiler encodes each known style (pill / word-bold / kinetic) into these primitive
+    fields so the backend paints from data and never branches on the style name (ADR 0002).
+    `background` is `None` for styles with no pill; sizes/paddings are in pixels at the IR canvas
+    scale. The pop-in *animation* of `kinetic` is not here -- it rides the layer's `opacity` and
+    `transform.scale` tracks, evaluated per frame by the keyframe sampler.
+    """
+
+    font_size: int = Field(gt=0)  # px at the IR canvas scale
+    font_weight: int = Field(ge=100, le=900)
+    color: str  # text fill, CSS color string
+    background: str | None = None  # pill fill, CSS color string; None = no pill
+    border_radius: int = Field(default=0, ge=0)  # px; the pill's rounding
+    padding_x: int = Field(default=0, ge=0)  # px; horizontal padding inside the pill
+    padding_y: int = Field(default=0, ge=0)  # px; vertical padding inside the pill
+
+
 # --- layers: common fields + discriminated union on `kind` ---
 
 
@@ -80,7 +99,8 @@ class MediaLayer(_Layer):
 class TextLayer(_Layer):
     kind: Literal["text"] = "text"
     runs: list[TextRun] = Field(min_length=1)
-    style: str  # caption-style name carried through (e.g. pill / word-bold / kinetic)
+    style: str  # caption-style name carried through as provenance; the backend never branches on it
+    props: TextStyle  # the compiled visual properties the backend actually paints from
 
 
 class AudioLayer(_Layer):

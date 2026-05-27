@@ -27,6 +27,18 @@ export interface TextRun {
   emphasis: boolean;
 }
 
+// Compiled visual properties of a caption. The compiler bakes the style (pill | word-bold |
+// kinetic) into these fields, so the component paints from data and never branches on style name.
+export interface TextStyle {
+  font_size: number; // px at the IR canvas scale
+  font_weight: number;
+  color: string; // CSS color
+  background?: string | null; // pill fill; null/absent = no pill
+  border_radius: number; // px
+  padding_x: number; // px
+  padding_y: number; // px
+}
+
 interface LayerBase {
   start: number; // absolute seconds
   end: number;
@@ -44,7 +56,8 @@ export interface MediaLayer extends LayerBase {
 export interface TextLayer extends LayerBase {
   kind: "text";
   runs: TextRun[];
-  style: string;
+  style: string; // provenance only; the component never branches on it
+  props: TextStyle; // the visual props the component paints from
 }
 
 export interface AudioLayer extends LayerBase {
