@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -41,6 +42,8 @@ from videogen.kernel.composition import (
     ZoomOverlay,
 )
 from videogen.services.media import MediaService
+from videogen.services.render import JobState, RenderService
+from videogen.stores.blobs import FilesystemBlobStore
 
 pytestmark = pytest.mark.integration
 
@@ -521,3 +524,42 @@ def test_effects_render_full_length_and_the_still_agrees_with_the_video_mid_effe
     plain_still = backend.render_still(plain_ir, mid, tmp_path / "plain_still.png")
     assert still.exists() and _mean_luma(still, at=0.0) > 5.0
     assert _changed_fraction(still, plain_still, at=0.0) > 0.001, "still did not reflect the effect"
+
+
+# --- async RenderService over the real backend (Phase 7) ---
+
+
+@requires_toolchain
+def test_async_submit_render_completes_and_yields_a_playable_artifact(
+    host_recording: Path,
+    host_only_composition: Callable[..., Composition],
+    tmp_path: Path,
+) -> None:
+    """The Phase 7 async contract end to end: submit -> poll to done -> a real mp4 on disk.
+
+    The same render-path assertions the plan prescribes (file exists, duration ~ host length, a
+    sampled frame is non-black), now reached through `submit_render -> status -> artifact` over the
+    real RemotionBackend rather than a synchronous call -- proving the job lifecycle drives the true
+    Composition -> IR -> backend pipeline and writes the artifact through the single blobs writer.
+    """
+    service = MediaService()
+    asset_id = service.ingest(host_recording)
+    facts = service.probe(asset_id)
+    comp = host_only_composition(src=str(service.resolve(asset_id)), duration=facts.duration)
+
+    with RenderService(
+        backend=RemotionBackend(), blobs=FilesystemBlobStore(tmp_path / "renders")
+    ) as render:
+        job_id = render.submit_render(comp, fps=round(facts.fps), duration=facts.duration)
+
+        deadline = time.monotonic() + 180.0  # a real Remotion render is seconds to minutes
+        status = render.status(job_id)
+        while status.state not in (JobState.done, JobState.failed) and time.monotonic() < deadline:
+            time.sleep(0.5)
+            status = render.status(job_id)
+
+    assert status.state is JobState.done, f"render did not finish: {status}"
+    out = Path(status.artifact)  # type: ignore[arg-type]
+    assert out.exists() and out.stat().st_size > 0
+    assert abs(_probe_duration(out) - _probe_duration(host_recording)) < 0.3
+    assert _mean_luma(out, at=1.0) > 5.0  # real footage reached the frames through the async path
