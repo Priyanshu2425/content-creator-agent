@@ -32,6 +32,8 @@ class ReviewCategory(StrEnum):
     caption_occlusion = "caption-occlusion"
     pacing = "pacing"
     framing = "framing"
+    audio = "audio"
+    reel_fit = "reel-fit"
 
 
 class Severity(StrEnum):

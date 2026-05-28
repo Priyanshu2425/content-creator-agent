@@ -120,6 +120,10 @@ def _apply_transitions(
     next_id = {ordered[i].id: ordered[i + 1].id for i in range(len(ordered) - 1)}
 
     for transition in composition.transitions:
+        if transition.kind is TransitionKind.whoosh:
+            # Hard visual cut — no opacity blend. Audio SFX layer will be injected here once the
+            # sfx/transitions/ folder is wired into the compile context (see TODO in compile_ir).
+            continue
         if transition.kind is not TransitionKind.crossfade:
             continue
         outgoing = by_id.get(transition.after_scene)

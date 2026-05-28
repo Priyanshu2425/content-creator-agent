@@ -9,7 +9,7 @@ Cross-cutting checks (scene overlap, gaps, region validity, caption alignment) a
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AssetId = str
 
@@ -58,6 +58,7 @@ class TransitionKind(StrEnum):
     """Non-cut boundaries only; a cut is the default and is never authored."""
 
     crossfade = "crossfade"
+    whoosh = "whoosh"  # hard visual cut + whoosh SFX at the boundary (audio wired in later)
 
 
 class _Model(BaseModel):
@@ -76,14 +77,39 @@ class Asset(_Model):
     src: str
 
 
+class CropRect(_Model):
+    """A normalized source sub-rectangle of an asset, in [0,1] fractions of the source's own frame.
+
+    When set on a region fill, only this window of the source is shown (then scaled to cover the
+    region's destination box), instead of the default centered cover. The window must lie inside the
+    source: ``x + width <= 1`` and ``y + height <= 1``.
+    """
+
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    width: float = Field(gt=0.0, le=1.0)
+    height: float = Field(gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _within_source(self) -> "CropRect":
+        if self.x + self.width > 1.0 or self.y + self.height > 1.0:
+            raise ValueError(
+                f"crop window must lie within the source: got x+width={self.x + self.width}, "
+                f"y+height={self.y + self.height} (both must be <= 1)"
+            )
+        return self
+
+
 class Ref(_Model):
     """A reference to an Asset by id, optionally carrying an in-point (source-time offset).
 
-    On-screen duration comes from the holding span (the Scene), not from the Reference.
+    On-screen duration comes from the holding span (the Scene), not from the Reference. ``crop``
+    optionally narrows which sub-rectangle of the source is shown in the region (see ``CropRect``).
     """
 
     asset: AssetId
     in_point: float | None = Field(default=None, alias="in", ge=0)
+    crop: CropRect | None = None
 
 
 class Audio(_Model):

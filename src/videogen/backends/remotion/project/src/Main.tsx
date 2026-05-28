@@ -33,6 +33,24 @@ function boxStyle(rect: Rect | null | undefined): React.CSSProperties {
   };
 }
 
+// How the source media sits inside its box. Without a crop it covers the box (centered cover). With
+// a crop, only that normalized source sub-rect is shown: the media is enlarged so the crop window
+// maps onto the box (width 1/cw, height 1/ch) and offset so the window's top-left sits at the box
+// origin; objectFit stays `cover` so the window fills the box with no letterboxing.
+function fillStyle(crop: Rect | null | undefined): React.CSSProperties {
+  if (!crop) {
+    return { width: "100%", height: "100%", objectFit: "cover" };
+  }
+  return {
+    position: "absolute",
+    width: `${100 / crop.width}%`,
+    height: `${100 / crop.height}%`,
+    left: `${(-crop.x * 100) / crop.width}%`,
+    top: `${(-crop.y * 100) / crop.height}%`,
+    objectFit: "cover",
+  };
+}
+
 const MediaLayerView: React.FC<{ layer: MediaLayer; from: number }> = ({ layer, from }) => {
   const { fps } = useVideoConfig();
   const frame = from + useCurrentFrame(); // absolute timeline frame for the sampler
@@ -40,8 +58,11 @@ const MediaLayerView: React.FC<{ layer: MediaLayer; from: number }> = ({ layer, 
   const scale = sample(layer.transform?.scale, frame, fps, 1);
   const tx = sample(layer.transform?.translate_x, frame, fps, 0);
   const ty = sample(layer.transform?.translate_y, frame, fps, 0);
-  const fill: React.CSSProperties = { width: "100%", height: "100%", objectFit: "cover" };
+  const fill = fillStyle(layer.crop);
   const src = staticFile(layer.src);
+  // startFrom seeks the source to the layer's in-point so a new Sequence doesn't replay from 0.
+  // muted suppresses the video's embedded audio; the AudioLayer is the sole audio master.
+  const startFrom = Math.round((layer.in ?? 0) * fps);
   return (
     <div
       style={{
@@ -54,14 +75,16 @@ const MediaLayerView: React.FC<{ layer: MediaLayer; from: number }> = ({ layer, 
       {layer.content === "image" ? (
         <Img src={src} style={fill} />
       ) : (
-        <OffthreadVideo src={src} style={fill} />
+        <OffthreadVideo src={src} startFrom={startFrom} muted style={fill} />
       )}
     </div>
   );
 };
 
 const AudioLayerView: React.FC<{ layer: AudioLayer }> = ({ layer }) => {
-  return <Audio src={staticFile(layer.src)} />;
+  const { fps } = useVideoConfig();
+  const startFrom = Math.round((layer.in ?? 0) * fps);
+  return <Audio src={staticFile(layer.src)} startFrom={startFrom} />;
 };
 
 // Captions sit in the lower third, centered, painted from the layer's compiled props. The pop-in of

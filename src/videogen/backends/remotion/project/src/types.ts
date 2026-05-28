@@ -62,6 +62,7 @@ export interface MediaLayer extends LayerBase {
   content: "video" | "image"; // paint as a clip or a still
   in?: number | null; // source in-point
   rect?: Rect | null; // destination box; null = full frame
+  crop?: Rect | null; // source sub-rect to show (normalized); null = whole source (cover)
 }
 
 export interface TextLayer extends LayerBase {
