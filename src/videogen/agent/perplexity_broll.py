@@ -1,11 +1,14 @@
 """PerplexityBrollAgent: fetches relevant b-roll images/videos via Perplexity web search.
 
 Two-turn exchange with sonar-pro:
-  1. Extract concrete visual search queries from the brief + transcript.
-  2. Search the web for those queries and return direct-download URLs.
+  1. Extract concrete visual search queries from the brief + transcript AND classify content
+     into one or more buckets (stock / news / science). The bucket drives which curated
+     source list is injected into Turn 2 — keeping the prompt tight and results more accurate.
+  2. Search the web using only the 4-5 most relevant sources for the detected bucket(s) and
+     return up to _CANDIDATE_POOL direct-download URLs.
 
-Each URL is then downloaded: plain HTTP GET first, yt-dlp fallback for streaming pages.
-Individual failures are logged and skipped; the pipeline continues with whatever succeeds.
+Each URL is then tried in order; the downloader stops as soon as ``limit`` downloads succeed
+(so broken/paywalled links are skipped without burning the quota).
 """
 
 from __future__ import annotations
@@ -22,24 +25,73 @@ from videogen import log
 
 _BASE_URL = "https://api.perplexity.ai"
 _DEFAULT_MODEL = "sonar-pro"
-# How many URL candidates to request from Perplexity. A large pool means the downloader can
-# skip broken/paywalled links and still fill the user's limit from working ones.
+# Always fetch a large candidate pool so broken links can be skipped without running short.
 _CANDIDATE_POOL = 100
+# How many sources to inject per detected category bucket.
+_SOURCES_PER_BUCKET = 4
+
+# Curated, reliable sources bucketed by content type.
+# Within each list, earlier entries are higher quality / more likely to yield direct downloads.
+SOURCE_BUCKETS: dict[str, list[str]] = {
+    "stock": [
+        "pexels.com",
+        "pixabay.com",
+        "unsplash.com",
+        "coverr.io",
+        "mixkit.co",
+        "videvo.net",
+        "lifeofpix.com",
+        "stocksnap.io",
+        "reshot.com",
+        "freestocktextures.com",
+    ],
+    "news": [
+        "commons.wikimedia.org",
+        "loc.gov",
+        "archive.org",
+        "flickr.com/commons",
+        "apnews.com",
+        "reuters.com/pictures",
+        "europeana.eu",
+        "dvidshub.net",
+        "un.org/photos",
+        "gettyimages.com",
+    ],
+    "science": [
+        "nasa.gov",
+        "noaa.gov",
+        "nih.gov",
+        "usgs.gov",
+        "cdc.gov",
+        "science.nasa.gov",
+        "esa.int",
+        "pond5.com/free",
+        "ncbi.nlm.nih.gov",
+    ],
+}
+
+_VALID_CATEGORIES = frozenset(SOURCE_BUCKETS)
 
 _TURN1_SYSTEM = """\
 You are a b-roll research assistant for short-form video production. Given a video brief and \
-transcript, extract specific visual search queries for relevant b-roll footage (images and video \
-clips). Return a JSON object with a single key "queries" containing an array of strings. \
-Each query must describe a concrete visual scene, object, or action. No prose, only valid JSON.\
+transcript, do two things and return a single JSON object with two keys:
+- "queries": an array of specific visual search query strings — each must describe a concrete \
+visual scene, object, or action (not an abstract concept).
+- "categories": an array containing one or more of exactly these strings: "stock", "news", \
+"science". Choose based on the content: "stock" for lifestyle, nature, business, or general \
+footage; "news" for current events, photojournalism, or historical archives; "science" for \
+technical, medical, space, environmental, or data-driven topics. Include all that apply.
+No prose, only valid JSON.\
 """
 
-_TURN2_SYSTEM = """\
-You are a b-roll researcher with live web search capability. For each query, find a direct-download \
-URL for a relevant image or video clip from your search results. Return a JSON object with a \
-single key "links" containing an array of objects, each with: "url" (a direct URL — preferably \
-ending in .jpg/.jpeg/.png/.webp/.mp4/.mov/.webm — or a streamable video page URL if no direct \
-link exists), "type" (either "image" or "video"), "description" (one sentence about what the \
-asset shows). Return only real URLs you found via search — no placeholders or made-up links.\
+# Turn 2 system prompt template — {sources} is filled with the selected source list at runtime.
+_TURN2_SYSTEM_TMPL = """\
+You are a b-roll researcher with live web search capability. For each query, find a \
+direct-download URL for a relevant image or video clip. Search these sources first: {sources}. \
+Return a JSON object with a single key "links" containing an array of objects, each with: \
+"url" (a direct URL ending in .jpg/.jpeg/.png/.webp/.mp4/.mov/.webm, or a streamable page URL \
+if no direct link exists), "type" (either "image" or "video"), "description" (one sentence \
+about what the asset shows). Return only real URLs found via search — no placeholders.\
 """
 
 
@@ -73,13 +125,13 @@ class PerplexityBrollAgent:
         """Return paths of successfully downloaded b-roll files, up to ``limit``."""
         dest.mkdir(parents=True, exist_ok=True)
 
-        queries = self._extract_queries(brief, transcript, limit)
+        queries, categories = self._extract_queries(brief, transcript, limit)
         if not queries:
             log.get().broll_fetch_warn("no queries extracted from brief + transcript")
             return []
 
-        # Always request a large candidate pool so enough working links exist to fill the limit.
-        links = self._fetch_links(queries, _CANDIDATE_POOL)
+        sources = _select_sources(categories)
+        links = self._fetch_links(queries, sources, _CANDIDATE_POOL)
         if not links:
             log.get().broll_fetch_warn("Perplexity returned no links")
             return []
@@ -99,29 +151,39 @@ class PerplexityBrollAgent:
         log.get().broll_fetch_done(len(paths))
         return paths
 
-    def _extract_queries(self, brief: str, transcript: str, limit: int) -> list[str]:
-        """Turn 1: derive search queries from the brief and transcript."""
+    def _extract_queries(
+        self, brief: str, transcript: str, limit: int
+    ) -> tuple[list[str], list[str]]:
+        """Turn 1: derive search queries AND content category buckets from the brief + transcript."""
         user = (
             f"Brief:\n{brief}\n\n"
             f"Transcript:\n{transcript}\n\n"
-            f"Extract up to {limit} visual search queries for b-roll footage."
+            f"Extract up to {limit} visual search queries and classify the content category."
         )
         raw = self._complete(_TURN1_SYSTEM, user)
         try:
             data = json.loads(raw)
-            return [str(q) for q in data.get("queries", []) if q]
+            queries = [str(q) for q in data.get("queries", []) if q]
+            categories = [c for c in data.get("categories", []) if c in _VALID_CATEGORIES]
+            if not categories:
+                categories = ["stock"]  # safe default for unclassified content
+            return queries, categories
         except (json.JSONDecodeError, AttributeError):
             log.get().broll_fetch_warn(f"turn-1 parse error (first 200 chars): {raw[:200]}")
-            return []
+            return [], ["stock"]
 
-    def _fetch_links(self, queries: list[str], pool: int) -> list[_BrollLink]:
-        """Turn 2: search the web for URLs matching the extracted queries."""
+    def _fetch_links(
+        self, queries: list[str], sources: list[str], pool: int
+    ) -> list[_BrollLink]:
+        """Turn 2: search the web for URLs, restricting to the bucket-selected sources."""
+        source_hint = ", ".join(sources)
+        system = _TURN2_SYSTEM_TMPL.format(sources=source_hint)
         user = (
             f"Search for b-roll footage matching these queries:\n"
             f"{json.dumps(queries, indent=2)}\n\n"
             f"Return up to {pool} items total."
         )
-        raw = self._complete(_TURN2_SYSTEM, user)
+        raw = self._complete(system, user)
         try:
             data = json.loads(raw)
             links: list[_BrollLink] = []
@@ -147,6 +209,18 @@ class PerplexityBrollAgent:
             temperature=0.2,
         )
         return _extract_json(response.choices[0].message.content or "")
+
+
+def _select_sources(categories: list[str]) -> list[str]:
+    """Pick the top ``_SOURCES_PER_BUCKET`` sources from each detected category, deduplicated."""
+    seen: set[str] = set()
+    selected: list[str] = []
+    for cat in categories:
+        for src in SOURCE_BUCKETS.get(cat, [])[:_SOURCES_PER_BUCKET]:
+            if src not in seen:
+                seen.add(src)
+                selected.append(src)
+    return selected
 
 
 def _extract_json(text: str) -> str:
