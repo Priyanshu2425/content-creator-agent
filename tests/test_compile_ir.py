@@ -23,6 +23,7 @@ from videogen.kernel.composition import (
     Caption,
     CaptionStyle,
     Composition,
+    CropRect,
     InsertOverlay,
     LayoutName,
     PanOverlay,
@@ -499,3 +500,20 @@ def test_effects_match_ir_snapshot() -> None:
 
     expected = json.loads(EFFECTS_SNAPSHOT.read_text())
     assert produced == expected
+
+
+def test_region_crop_flows_into_the_media_layer() -> None:
+    # A source crop set on a region fill (set_crop) compiles onto that region's media layer as a
+    # normalized IR Rect; a fill with no crop stays None (the default centered cover).
+    builder = Builder.new(
+        voiceover="host", duration=2.0, assets={"host": Asset(type=AssetType.video, src="host.mp4")}
+    )
+    builder.add_scene(LayoutName.full, 0.0, 2.0, id="s0")
+    builder.fill_region("s0", RegionName.full, "host")
+    builder.set_crop("s0", RegionName.full, CropRect(x=0.1, y=0.0, width=0.8, height=1.0))
+
+    ir = compile_ir(builder.composition, fps=30, duration=2.0)
+    media = next(layer for layer in ir.layers if isinstance(layer, MediaLayer))
+
+    assert media.crop is not None
+    assert (media.crop.x, media.crop.y, media.crop.width, media.crop.height) == (0.1, 0.0, 0.8, 1.0)

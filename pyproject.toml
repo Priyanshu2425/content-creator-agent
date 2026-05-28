@@ -7,6 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     # Foundation of the Composition + IR types (ADR 0001/0002/0003), built in Phase 1.
     "pydantic>=2.9",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
 ]
 
 [project.optional-dependencies]
@@ -14,6 +16,21 @@ dependencies = [
 # model, so it is opt-in: ingest/probe/resolve and the whole render path work without it, and
 # `MediaService.transcribe` imports it lazily. Install with `uv sync --extra transcribe`.
 transcribe = ["faster-whisper>=1.0"]
+# Phase 9 live model adapters. Both SDKs are imported lazily (like faster-whisper): the package and
+# its deterministic tests load without them, and an install hint surfaces only on a real `videogen
+# make` run. authoring = the agent's ModelClient (Anthropic); review = the Phase 8b video reviewer
+# (Gemini). `live` pulls everything a real end-to-end run needs.
+authoring = ["anthropic>=0.40"]
+review = ["google-genai>=0.3"]
+# OpenAI-compatible ModelClients (NVIDIA NIM, Perplexity, ...) all share the openai SDK.
+openai = ["openai>=1.0"]
+# Claude Code authoring client (ADR 0006): drives the loop via the Claude Code CLI's auth, no API
+# key. Needs the bundled CLI to be authenticated; imported lazily in clients/claude_code.py.
+claude-code = ["claude-agent-sdk>=0.1"]
+# Media creation providers (TODO 3, scaffolding): image/video via google-genai (Imagen + Veo),
+# audio via elevenlabs. Imported lazily in creation/*; not wired into the loop yet.
+creation = ["elevenlabs>=1.0", "google-genai>=0.3"]
+live = ["videogen[transcribe,authoring,review,openai,claude-code,creation]"]
 
 [project.scripts]
 # Reserved now; the command body lands in Phase 9 (see app/cli.py).
@@ -60,6 +77,12 @@ exclude = ['(^|/)node_modules/', 'backends/remotion/project/']
 # don't fail type-checking when the extra isn't installed.
 [[tool.mypy.overrides]]
 module = "faster_whisper.*"
+ignore_missing_imports = true
+
+# The Phase 9 live model SDKs are optional and imported lazily in their adapters; don't fail
+# type-checking when the `authoring`/`review` extras aren't installed.
+[[tool.mypy.overrides]]
+module = ["anthropic.*", "google", "google.*", "openai.*", "claude_agent_sdk.*", "elevenlabs.*"]
 ignore_missing_imports = true
 
 # --- Test --------------------------------------------------------------------

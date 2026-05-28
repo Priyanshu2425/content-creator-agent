@@ -89,7 +89,7 @@ def test_in_point_serializes_under_glossary_key() -> None:
     # The wire form must carry `in` (glossary), not the Python field name `in_point`.
     ref = Ref(asset="tweet", in_point=2.0)
     dumped = ref.model_dump(by_alias=True)
-    assert dumped == {"asset": "tweet", "in": 2.0}
+    assert dumped == {"asset": "tweet", "in": 2.0, "crop": None}  # crop defaults None
 
 
 def test_transition_keyed_by_after_scene() -> None:

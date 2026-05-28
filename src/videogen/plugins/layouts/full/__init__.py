@@ -10,7 +10,13 @@ from __future__ import annotations
 
 from videogen.kernel.composition import LayoutName, RegionName, Scene
 from videogen.kernel.ir import Layer, MediaLayer
-from videogen.kernel.registry import CompileContext, LayoutContract, media_content, register_layout
+from videogen.kernel.registry import (
+    CompileContext,
+    LayoutContract,
+    media_content,
+    media_crop,
+    register_layout,
+)
 
 REGIONS = frozenset({RegionName.full})
 
@@ -30,6 +36,7 @@ def to_ir(scene: Scene, ctx: CompileContext) -> list[Layer]:
             content=media_content(asset),
             in_point=ref.in_point,
             rect=None,  # full frame
+            crop=media_crop(ref),
         )
     ]
 

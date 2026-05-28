@@ -7,9 +7,10 @@ Design is captured in [`CONTEXT.md`](CONTEXT.md) (glossary), [`docs/adr/`](docs/
 (decisions), and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (build order). Per-phase
 specs live in [`prd/`](prd/).
 
-> **Status: Phase 2 (host-only render path).** The Python↔Remotion↔IR seam is proven on the
-> simplest case: a host recording → a single `full`-scene Composition → neutral IR → an mp4 of
-> the talking head. Captions (the MVP) arrive in Phase 3.
+> **Status: Phase 9 (end-to-end CLI).** The whole pipeline is wired behind one command: a host
+> recording + optional b-roll + a free-text brief → ingest/probe/transcribe → an authoring agent
+> builds a validated Composition → a video-capable reviewer gates finalization → an async render
+> → a finished 9:16 mp4. See [Make a video](#make-a-video).
 
 ## Layout
 
@@ -28,12 +29,17 @@ tests/
 
 ## Setup
 
-Prerequisites: [`uv`](https://docs.astral.sh/uv/), Node 18+ / npm. Phases 2+ also need
-`ffmpeg`/`ffprobe` on `PATH`; Phase 8 needs `ANTHROPIC_API_KEY` set.
+Prerequisites: [`uv`](https://docs.astral.sh/uv/), Node 18+ / npm, and `ffmpeg`/`ffprobe` on
+`PATH`. A live `videogen make` run also needs transcription (faster-whisper) and the two model
+SDKs, plus their keys: `ANTHROPIC_API_KEY` (authoring) and `GOOGLE_API_KEY` or `GEMINI_API_KEY`
+(the video reviewer).
 
 ```sh
 # Python environment (creates .venv from the lockfile)
 uv sync
+
+# Everything a real end-to-end run needs (transcription + both model SDKs)
+uv sync --extra live
 
 # Node deps for the Remotion render project
 npm --prefix src/videogen/backends/remotion/project install
@@ -66,4 +72,27 @@ fast unit + snapshot tests with:
 ```sh
 uv run pytest -m "not integration"
 ```
+
+## Make a video
+
+The `videogen make` command (`app/cli.py`) is the single entry point over the whole stack. It is
+deliberately thin — argument parsing and orchestration only — and wires the three services as
+direct in-process calls behind their interfaces (ADR 0003, monolith-first).
+
+```sh
+uv run videogen make --host host.mp4 --broll a.png,b.mp4 --brief "50s short on X; open on the clip"
+```
+
+- `--host` (**required**) is the host-cam recording; its audio is the voiceover and master clock.
+- `--broll` (**optional**) is a comma-separated list mixing stills and clips.
+- `--brief` (**free text**) carries topic, length, style, and must-use moments — no schema.
+
+It ingests and probes the inputs, transcribes the host audio, hands the agent a Media Manifest +
+the brief, runs the Phase 8b finalization gate (render → video-review → corrective edits → re-render,
+capped), and submits the final async render. The output mp4's path is printed on completion; a
+failure is reported with the stage that broke and a non-zero exit.
+
+The reference-video full check (a split-screen hook, the host with a slow zoom, a b-roll cut, and
+synced captions) is the human-judged acceptance target; the automated guarantee that the pipeline
+stays wired is the gated E2E smoke (`tests/test_e2e.py`, marked `integration`).
 

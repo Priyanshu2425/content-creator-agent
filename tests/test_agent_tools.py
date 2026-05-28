@@ -190,6 +190,26 @@ def test_tool_table_covers_the_expected_surface_and_classifies_each_tool() -> No
     assert FINISH_OP == "finish"
 
 
+def test_crop_tools_are_live_and_dispatch_to_set_crop() -> None:
+    # crop_image/crop_video are activated as mutating tools (no longer DRAFT).
+    assert {"crop_image", "crop_video"} <= {tool.name for tool in TOOLS}
+    assert {"crop_image", "crop_video"} <= MUTATING_OPS
+
+    builder = fresh_builder()
+    builder.add_scene(LayoutName.full, 0.0, 2.0, id="s0")
+    builder.fill_region("s0", RegionName.full, "host")
+    result = _dispatch(
+        builder,
+        "crop_video",
+        {"scene_id": "s0", "region": "full", "x": 0.1, "y": 0.0, "width": 0.8, "height": 1.0},
+    )
+
+    assert result.ok  # mirrors builder.set_crop
+    crop = builder.composition.scenes[0].regions[RegionName.full].crop
+    assert crop is not None
+    assert (crop.x, crop.y, crop.width, crop.height) == (0.1, 0.0, 0.8, 1.0)
+
+
 def _enum_choices(tool_name: str, prop: str) -> list[str]:
     spec = next(tool for tool in TOOLS if tool.name == tool_name)
     props = spec.input_schema["properties"]

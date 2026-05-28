@@ -24,15 +24,18 @@ itself, since corrections are not a new mutation path (ADR 0003 persistence, sto
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from videogen import log
 from videogen.agent.loop import AuthoringLoop
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import Manifest
 from videogen.agent.prompts import SYSTEM_PROMPT
 from videogen.agent.review import ReviewAgent, ReviewFeedback, format_feedback
+from videogen.agent.vision_advice import VisionAdvisor
 from videogen.backends.base import RenderBackend
 from videogen.kernel import resolver
 from videogen.kernel.builder import Builder
@@ -50,8 +53,12 @@ class VideoRenderer(Protocol):
     swappable (ADR 0002).
     """
 
-    def render_video(self, composition: Composition, *, fps: int, duration: float) -> Path:
-        """Render ``composition`` to an mp4 and return the artifact's location."""
+    def render_video(
+        self, composition: Composition, *, fps: int, duration: float, name: str | None = None
+    ) -> Path:
+        """Render ``composition`` to an mp4 and return the artifact's location.
+
+        ``name`` optionally labels the output file (e.g. ``round-1.mp4``)."""
         ...
 
 
@@ -88,6 +95,8 @@ class FinalizationGate:
         system: str = SYSTEM_PROMPT,
         max_ops: int = 40,
         max_rounds: int = 2,
+        artifacts_dir: Path | None = None,
+        advisor: VisionAdvisor | None = None,
     ) -> None:
         self._client = client
         self._builder = builder
@@ -100,6 +109,8 @@ class FinalizationGate:
         self._system = system
         self._max_ops = max_ops
         self._max_rounds = max_rounds
+        self._artifacts_dir = artifacts_dir
+        self._advisor = advisor
 
     def run(self) -> FinalizationResult:
         feedback_history: list[ReviewFeedback] = []
@@ -109,8 +120,9 @@ class FinalizationGate:
 
         for round_index in range(self._max_rounds):
             rounds += 1
-            video = self._render()
-            feedback = self._review(video)
+            log.get().finalize_round_start(rounds, self._max_rounds)
+            video = self._render(rounds)
+            feedback = self._review(video, rounds)
             feedback_history.append(feedback)
             if feedback.no_actionable_issues:
                 terminated_clean = True
@@ -128,21 +140,38 @@ class FinalizationGate:
             terminated_clean=terminated_clean,
         )
 
-    def _render(self) -> Path:
+    def _render(self, round_number: int) -> Path:
+        log.get().finalize_render_start()
         video = self._renderer.render_video(
             self._builder.composition,
             fps=int(self._manifest.fps),
             duration=self._manifest.duration,
+            name=f"round-{round_number}.mp4",
         )
         self._store.note(self._doc_id, op="render_video")
+        log.get().finalize_render_done(video)
         return video
 
-    def _review(self, video: Path) -> ReviewFeedback:
+    def _review(self, video: Path, round_number: int) -> ReviewFeedback:
+        log.get().finalize_review_start()
         timeline = resolver.timeline(self._builder.composition, duration=self._manifest.duration)
         feedback = self._reviewer.review(
             video=video, composition=self._builder.composition, timeline=timeline
         )
         self._store.note(self._doc_id, op="review")
+        log.get().finalize_review_done(feedback.no_actionable_issues, len(feedback.items))
+        feedback_json = json.dumps(
+            [
+                {"at": i.at, "until": i.until, "category": i.category.value,
+                 "severity": i.severity.value, "note": i.note}
+                for i in feedback.items
+            ]
+        )
+        log.get().finalize_feedback(feedback_json)
+        if self._artifacts_dir is not None:
+            (self._artifacts_dir / f"review-round-{round_number}.json").write_text(
+                feedback_json, encoding="utf-8"
+            )
         return feedback
 
     def _apply_edits(self, feedback: ReviewFeedback, round_index: int) -> None:
@@ -162,5 +191,7 @@ class FinalizationGate:
             brief=brief,
             system=self._system,
             max_ops=self._max_ops,
+            artifacts_dir=self._artifacts_dir,
+            advisor=self._advisor,
         )
         loop.run()

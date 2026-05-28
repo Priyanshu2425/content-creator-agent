@@ -110,6 +110,7 @@ class MediaLayer(_Layer):
     content: Literal["video", "image"] = "video"  # how the backend paints it (clip vs still)
     in_point: float | None = Field(default=None, alias="in", ge=0)
     rect: Rect | None = None  # destination box (normalized); None = full frame
+    crop: Rect | None = None  # source sub-rect to show (normalized); None = whole source (cover)
 
 
 class TextLayer(_Layer):

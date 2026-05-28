@@ -49,12 +49,14 @@ class ScriptedClient:
         self._turns = list(turns)
         self.calls = 0
         self.seen: list[list[HistoryItem]] = []
+        self.tools_seen: list[list[str]] = []  # the tool names offered on each turn
 
     def next_turn(
         self, *, system: str, history: Sequence[HistoryItem], tools: Sequence[ToolSpec]
     ) -> AssistantTurn:
         self.calls += 1
         self.seen.append(list(history))
+        self.tools_seen.append([t.name for t in tools])
         return self._turns.pop(0) if self._turns else AssistantTurn()
 
 
@@ -119,6 +121,7 @@ def make_loop(
     backend: object | None = None,
     builder: Builder | None = None,
     max_ops: int = 40,
+    advisor: object | None = None,
 ) -> tuple[AuthoringLoop, Builder, CompositionStore, str]:
     builder = builder or Builder.new(
         voiceover="host",
@@ -136,8 +139,39 @@ def make_loop(
         backend=backend,  # type: ignore[arg-type]
         brief="make a short",
         max_ops=max_ops,
+        advisor=advisor,  # type: ignore[arg-type]
     )
     return loop, builder, store, doc_id
+
+
+class BlindClient(ScriptedClient):
+    """A ScriptedClient that cannot consume images -- the trigger for the advisor channel."""
+
+    consumes_images = False
+
+
+class FakeAdvisor:
+    """A VisionAdvisor that records each call and returns canned text advice."""
+
+    def __init__(self, advice: str = "shift the host crop down ~10%") -> None:
+        self._advice = advice
+        self.calls: list[dict[str, object]] = []
+
+    def advise(self, *, image: bytes, question: str, context: str) -> str:
+        self.calls.append({"image": image, "question": question, "context": context})
+        return self._advice
+
+
+def seeded_builder() -> Builder:
+    """A gate-clean first pass: one full scene filled with the host, so ``finish`` terminates."""
+    builder = Builder.new(
+        voiceover="host",
+        duration=2.0,
+        assets={"host": Asset(type=AssetType.video, src="host.mp4")},
+    )
+    builder.add_scene(LayoutName.full, 0.0, 2.0, id="s0")
+    builder.fill_region("s0", RegionName.full, "host")
+    return builder
 
 
 def _last_tool_results(history: list[HistoryItem]) -> ToolResultsMessage:
@@ -259,3 +293,71 @@ def test_system_prompt_carries_vocabulary_and_the_loop_contract() -> None:
         assert term in SYSTEM_PROMPT
     assert "one" in SYSTEM_PROMPT.lower()  # one op per turn
     assert "finish" in SYSTEM_PROMPT
+
+
+# --- the advisor / consult_placement channel for image-blind clients (ADR 0007) ---
+
+
+def test_blind_client_with_advisor_is_offered_consult_placement_and_it_returns_text() -> None:
+    client = BlindClient(
+        [
+            turn(call("consult_placement", t=1.0, question="is the host's face cut off?")),
+            turn(call("finish")),
+        ]
+    )
+    backend = CountingBackend()
+    advisor = FakeAdvisor("shift the host crop down 10%")
+    loop, _builder, store, doc_id = make_loop(
+        client, backend=backend, builder=seeded_builder(), advisor=advisor
+    )
+
+    result = loop.run()
+
+    assert result.terminated_clean
+    offered = client.tools_seen[0]
+    assert "consult_placement" in offered  # the text-return vision channel is advertised
+    assert "render_still" not in offered and "scene_preview" not in offered  # image tools dropped
+    assert backend.still == 1 and backend.video == 0  # advice renders a still, never a video
+    assert advisor.calls[0]["question"] == "is the host's face cut off?"
+    assert advisor.calls[0]["image"] == b"fake-png"  # the rendered frame reached the advisor
+    assert "consult_placement" in [entry.op for entry in store.journal(doc_id)]
+
+
+def test_sighted_client_keeps_image_vision_tools_and_is_not_offered_the_advisor() -> None:
+    client = ScriptedClient([turn(call("finish"))])  # no consumes_images attr -> treated as sighted
+    advisor = FakeAdvisor()
+    loop, _builder, _store, _doc_id = make_loop(
+        client, backend=CountingBackend(), builder=seeded_builder(), advisor=advisor
+    )
+
+    loop.run()
+
+    offered = client.tools_seen[0]
+    assert "render_still" in offered and "scene_preview" in offered
+    assert "consult_placement" not in offered
+    assert advisor.calls == []  # a sighted client never consults the advisor
+
+
+def test_blind_client_without_an_advisor_is_not_offered_consult_placement() -> None:
+    client = BlindClient([turn(call("finish"))])
+    loop, _builder, _store, _doc_id = make_loop(
+        client, backend=CountingBackend(), builder=seeded_builder()  # no advisor injected
+    )
+
+    loop.run()
+
+    offered = client.tools_seen[0]
+    assert "consult_placement" not in offered  # nothing to delegate to
+    assert "render_still" in offered  # falls back to the full TOOLS list unchanged
+
+
+def test_blind_client_with_advisor_but_no_backend_falls_back_to_plain_tools() -> None:
+    client = BlindClient([turn(call("finish"))])
+    loop, _builder, _store, _doc_id = make_loop(
+        client, backend=None, builder=seeded_builder(), advisor=FakeAdvisor()
+    )
+
+    loop.run()
+
+    # no backend means no still to render, so the advice tool can't function -> not offered
+    assert "consult_placement" not in client.tools_seen[0]

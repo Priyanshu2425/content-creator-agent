@@ -47,11 +47,13 @@ class ScriptedClient:
     def __init__(self, turns: list[AssistantTurn]) -> None:
         self._turns = list(turns)
         self.calls = 0
+        self.tools_seen: list[list[str]] = []  # tool names offered on each (edit-round) turn
 
     def next_turn(
         self, *, system: str, history: Sequence[HistoryItem], tools: Sequence[ToolSpec]
     ) -> AssistantTurn:
         self.calls += 1
+        self.tools_seen.append([t.name for t in tools])
         return self._turns.pop(0) if self._turns else AssistantTurn()
 
 
@@ -81,9 +83,11 @@ class FakeRenderer:
         self._out_dir = out_dir
         self.calls = 0
 
-    def render_video(self, composition: Composition, *, fps: int, duration: float) -> Path:
+    def render_video(
+        self, composition: Composition, *, fps: int, duration: float, name: str | None = None
+    ) -> Path:
         ir = compile_ir(composition, fps=fps, duration=duration)
-        out = self._out_dir / f"render-{self.calls}.mp4"
+        out = self._out_dir / (name or f"render-{self.calls}.mp4")
         self.calls += 1
         return self._backend.render_video(ir, out)
 
@@ -166,6 +170,7 @@ def make_gate(
     backend: object | None = None,
     builder: Builder | None = None,
     max_rounds: int = 2,
+    advisor: object | None = None,
 ) -> tuple[FinalizationGate, Builder, CompositionStore, str]:
     builder = builder or seeded_builder()
     store = CompositionStore()
@@ -180,8 +185,37 @@ def make_gate(
         renderer=renderer,  # type: ignore[arg-type]
         backend=backend,  # type: ignore[arg-type]
         max_rounds=max_rounds,
+        advisor=advisor,  # type: ignore[arg-type]
     )
     return gate, builder, store, doc_id
+
+
+class _BlindClient(ScriptedClient):
+    consumes_images = False
+
+
+class _FakeAdvisor:
+    def advise(self, *, image: bytes, question: str, context: str) -> str:
+        return "advice"
+
+
+def test_advisor_reaches_the_edit_round_loop_for_a_blind_client(tmp_path: Path) -> None:
+    # A blind client driven through a blocking round: the per-round AuthoringLoop must still offer
+    # it consult_placement, i.e. the advisor is threaded into _apply_edits (ADR 0007).
+    backend = CountingBackend()
+    renderer = FakeRenderer(backend, tmp_path)
+    reviewer = ScriptedReviewer([_blocking("look again"), _CLEAN])
+    client = _BlindClient([turn(call("add_caption", text="x", start=0.1, end=0.2, style="pill")),
+                           turn(call("finish"))])
+    gate, _builder, _store, _doc_id = make_gate(
+        client, reviewer, renderer, backend=backend, advisor=_FakeAdvisor()
+    )
+
+    gate.run()
+
+    # the edit-round turns offered the advice tool and not the image vision tools
+    assert any("consult_placement" in offered for offered in client.tools_seen)
+    assert all("render_still" not in offered for offered in client.tools_seen)
 
 
 def test_a_clean_first_pass_renders_once_and_runs_no_edit_rounds(tmp_path: Path) -> None:

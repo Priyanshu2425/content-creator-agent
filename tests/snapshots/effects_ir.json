@@ -39,7 +39,8 @@
       "src": "host.mp4",
       "content": "video",
       "in": null,
-      "rect": null
+      "rect": null,
+      "crop": null
     },
     {
       "start": 0.0,
@@ -129,7 +130,8 @@
         "y": 0.04,
         "width": 0.3,
         "height": 0.16874999999999998
-      }
+      },
+      "crop": null
     }
   ]
 }

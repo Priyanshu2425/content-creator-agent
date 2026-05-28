@@ -27,6 +27,7 @@ from videogen.agent.model import ToolSpec
 from videogen.kernel.builder import Builder, OpResult, TranscriptLike
 from videogen.kernel.composition import (
     CaptionStyle,
+    CropRect,
     LayoutName,
     Overlay,
     RegionName,
@@ -51,9 +52,14 @@ MUTATING_OPS = {
     "add_caption",
     "add_captions_from_transcript",
     "set_transition",
+    "crop_image",
+    "crop_video",
 }
 VISION_OPS = {"render_still", "scene_preview"}
 FINISH_OP = "finish"
+# The text-return vision channel for image-blind clients (ADR 0007). Kept OUT of TOOLS and the sets
+# above: the loop swaps it in for VISION_OPS only when the client cannot see and an advisor exists.
+ADVICE_OP = "consult_placement"
 
 
 def build_overlay(args: dict[str, object]) -> Overlay:
@@ -127,11 +133,41 @@ def apply_op(
             TransitionKind(cast(str, args.get("kind", TransitionKind.crossfade.value))),
             duration=cast(float, args.get("duration", 0.5)),
         )
+    if name in ("crop_image", "crop_video"):
+        # Both tools set a source crop window on an existing region fill (the image/video split is
+        # advisory for the model); they share the one Builder op.
+        return builder.set_crop(
+            cast(str, args["scene_id"]),
+            RegionName(cast(str, args["region"])),
+            CropRect(
+                x=cast(float, args["x"]),
+                y=cast(float, args["y"]),
+                width=cast(float, args["width"]),
+                height=cast(float, args["height"]),
+            ),
+        )
     raise KeyError(f"not a mutating tool: {name!r}")
 
 
 def _number(description: str) -> dict[str, object]:
     return {"type": "number", "description": description}
+
+
+def _unit(description: str) -> dict[str, object]:
+    """A normalized [0, 1] fraction of the source -- the unit crop rects are expressed in."""
+    return {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": description}
+
+
+# Shared schema for the two crop tools: a normalized source sub-rect set on an existing region fill.
+_CROP_RECT_PROPS: dict[str, object] = {
+    "scene_id": {"type": "string"},
+    "region": {"type": "string", "enum": _choices(RegionName)},
+    "x": _unit("crop left edge, fraction of the source width"),
+    "y": _unit("crop top edge, fraction of the source height"),
+    "width": _unit("crop width, fraction of the source width"),
+    "height": _unit("crop height, fraction of the source height"),
+}
+_CROP_RECT_REQUIRED = ["scene_id", "region", "x", "y", "width", "height"]
 
 
 TOOLS: list[ToolSpec] = [
@@ -235,6 +271,32 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     ToolSpec(
+        name="crop_image",
+        description=(
+            "Set the crop window for how an IMAGE asset fills a region: the normalized sub-rect of "
+            "the source to show (then scaled to cover the region), instead of the default centered "
+            "cover. The region must already be filled (call fill_region first)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": dict(_CROP_RECT_PROPS),
+            "required": list(_CROP_RECT_REQUIRED),
+        },
+    ),
+    ToolSpec(
+        name="crop_video",
+        description=(
+            "Set the crop window for how a VIDEO asset fills a region: the normalized sub-rect of "
+            "the source to show (then scaled to cover the region), instead of the default centered "
+            "cover. The region must already be filled (call fill_region first)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": dict(_CROP_RECT_PROPS),
+            "required": list(_CROP_RECT_REQUIRED),
+        },
+    ),
+    ToolSpec(
         name="render_still",
         description=(
             "Render a single still frame at absolute second t and return it as an image. Use "
@@ -265,5 +327,84 @@ TOOLS: list[ToolSpec] = [
             "remain it reports them and you keep going; if clean, authoring terminates."
         ),
         input_schema={"type": "object", "properties": {}, "required": []},
+    ),
+]
+
+
+# The advice tool for image-blind clients (ADVICE_OP). Not in TOOLS: the loop advertises it in place
+# of the image vision tools only when the client cannot see images and a VisionAdvisor is wired.
+CONSULT_PLACEMENT_TOOL = ToolSpec(
+    name=ADVICE_OP,
+    description=(
+        "You cannot see images. Render the frame at absolute second t and ask a vision-capable "
+        "advisor a question about asset placement, framing, cropping, or occlusion; you get back "
+        "text advice to act on (e.g. which layout/region, or a crop window for set_crop). Use it "
+        "sparingly -- it costs a render plus an advisor call."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "t": _number("timeline second to render and ask about"),
+            "question": {
+                "type": "string",
+                "description": "what to ask about placement/framing/cropping/occlusion at t",
+            },
+        },
+        "required": ["t", "question"],
+    },
+)
+
+
+# --- DRAFT tools: defined but NOT advertised to or dispatched by the agent yet (TODO 3) ---------
+#
+# These describe the intended surface for media *creation* and are deliberately kept OUT of
+# ``TOOLS`` (and the routing sets ``MUTATING_OPS``/``VISION_OPS``/``FINISH_OP``), so the loop
+# neither offers nor runs them. They exist so the shape is agreed before activation.
+#
+# create_image / create_video generate a new b-roll asset from a text prompt (used when little or
+# no b-roll is supplied), backed by the ``creation`` providers. Activation work: dispatch that
+# creates the asset, writes it into the run folder, and declares it in the asset library.
+#
+# (crop_image / crop_video are now live -- see ``TOOLS`` and ``apply_op`` above.)
+
+DRAFT_OPS = {"create_image", "create_video"}
+
+DRAFT_TOOLS: list[ToolSpec] = [
+    ToolSpec(
+        name="create_image",
+        description=(
+            "Generate a new still-image b-roll asset from a text prompt (when little or no b-roll "
+            "is supplied). Returns a new asset id you can then place with fill_region."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "what the image should depict"},
+                "aspect_ratio": {
+                    "type": "string",
+                    "description": "e.g. '9:16'; default matches the output canvas",
+                },
+            },
+            "required": ["prompt"],
+        },
+    ),
+    ToolSpec(
+        name="create_video",
+        description=(
+            "Generate a new video-clip b-roll asset from a text prompt (when little or no b-roll "
+            "is supplied). Returns a new asset id you can then place with fill_region."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "what the clip should show"},
+                "aspect_ratio": {
+                    "type": "string",
+                    "description": "e.g. '9:16'; default matches the output canvas",
+                },
+                "duration": _number("desired clip length, seconds"),
+            },
+            "required": ["prompt"],
+        },
     ),
 ]

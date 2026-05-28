@@ -66,6 +66,18 @@ def media_content(asset: Asset) -> Literal["video", "image"]:
     return "image" if asset.type is AssetType.image else "video"
 
 
+def media_crop(ref: Ref) -> Rect | None:
+    """Carry a Reference's optional source crop window into the neutral IR ``Rect`` a layer uses.
+
+    Layouts share this so a region fill's ``crop`` reaches the backend as the same normalized rect
+    vocabulary as the destination box -- the backend shows that source sub-rect instead of the whole
+    source (ADR 0002). ``None`` means no crop (the default centered cover).
+    """
+    if ref.crop is None:
+        return None
+    return Rect(x=ref.crop.x, y=ref.crop.y, width=ref.crop.width, height=ref.crop.height)
+
+
 def _no_param_errors(scene: Scene) -> list[str]:
     """Default param validation: a Layout with no preset parameters is always clean."""
     return []

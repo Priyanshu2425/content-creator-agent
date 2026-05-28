@@ -73,7 +73,15 @@ HistoryItem = UserMessage | AssistantTurn | ToolResultsMessage
 class ModelClient(Protocol):
     """The swappable model. Given the system prompt, the running history, and the available tools,
     return the next assistant turn. Implementations: a scripted stub (tests) or a real provider
-    adapter (deferred) -- the loop never depends on which."""
+    adapter -- the loop never depends on which.
+
+    Optional capability signal: an implementation may set a class/instance attribute
+    ``consumes_images: bool`` to advertise whether it has an image-input channel (whether image
+    ``ToolResult``s in the history are actually seen, vs. stringified away). It is intentionally
+    not a required Protocol member -- the loop reads it with ``getattr(client, "consumes_images",
+    True)`` so clients (and scripted test stubs) that omit it are treated as sighted, unchanged. A
+    client that cannot see images sets it ``False``, which lets the loop offer it a text-return
+    vision channel (the ``consult_placement`` tool) instead of the image vision tools (ADR 0007)."""
 
     def next_turn(
         self,

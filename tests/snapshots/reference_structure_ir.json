@@ -27,7 +27,8 @@
         "y": 0.0,
         "width": 1.0,
         "height": 0.6
-      }
+      },
+      "crop": null
     },
     {
       "start": 0.0,
@@ -52,7 +53,8 @@
         "y": 0.6,
         "width": 1.0,
         "height": 0.4
-      }
+      },
+      "crop": null
     },
     {
       "start": 2.0,
@@ -77,7 +79,8 @@
       "src": "host.mp4",
       "content": "video",
       "in": 10.0,
-      "rect": null
+      "rect": null,
+      "crop": null
     },
     {
       "start": 4.0,
@@ -102,7 +105,8 @@
       "src": "tweet.png",
       "content": "image",
       "in": null,
-      "rect": null
+      "rect": null,
+      "crop": null
     },
     {
       "start": 0.0,

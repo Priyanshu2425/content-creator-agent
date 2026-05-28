@@ -117,7 +117,9 @@ class _FakeRenderer:
         self.path = path
         self.calls = 0
 
-    def render_video(self, composition: Composition, *, fps: int, duration: float) -> Path:
+    def render_video(
+        self, composition: Composition, *, fps: int, duration: float, name: str | None = None
+    ) -> Path:
         self.calls += 1
         return self.path
 

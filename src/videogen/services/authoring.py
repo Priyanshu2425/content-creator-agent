@@ -22,11 +22,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from videogen.agent import creation_styles
 from videogen.agent.loop import AuthoringLoop
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import Manifest
-from videogen.agent.prompts import SYSTEM_PROMPT
 from videogen.agent.review import ReviewAgent
+from videogen.agent.vision_advice import VisionAdvisor
 from videogen.backends.base import RenderBackend
 from videogen.kernel.builder import Builder
 from videogen.kernel.composition import Asset, AssetType, Composition
@@ -54,10 +55,26 @@ class AuthoredComposition:
 
 
 class AuthoringService:
-    """Produces a Composition from a Manifest + brief by running the authoring agent loop."""
+    """Produces a Composition from a Manifest + brief by running the authoring agent loop.
 
-    def __init__(self, *, backend: RenderBackend | None = None) -> None:
+    ``artifacts_dir`` is the per-run folder (``renders/<timestamp>/``) where the agent's
+    intermediate artifacts -- stills/previews, the authored ``composition.json``, and the reviewer's
+    per-round feedback -- are persisted. When ``None`` (the default, e.g. in unit tests) nothing is
+    written to disk and behaviour is unchanged.
+    """
+
+    def __init__(
+        self,
+        *,
+        backend: RenderBackend | None = None,
+        artifacts_dir: Path | None = None,
+        system: str | None = None,
+    ) -> None:
         self._backend = backend
+        self._artifacts_dir = artifacts_dir
+        # The authoring system prompt (a creation style). ``None`` falls back to the active default
+        # style at author time, so the choice lives in ``creation_styles.DEFAULT_STYLE``.
+        self._system = system
 
     def author(
         self,
@@ -67,10 +84,14 @@ class AuthoringService:
         model_client: ModelClient,
         reviewer: ReviewAgent | None = None,
         renderer: VideoRenderer | None = None,
+        advisor: VisionAdvisor | None = None,
         max_ops: int = 40,
         max_review_rounds: int = 2,
-        system: str = SYSTEM_PROMPT,
+        system: str | None = None,
     ) -> AuthoredComposition:
+        # Precedence: an explicit call argument, then the service's configured style, then the
+        # active default style (``creation_styles.DEFAULT_STYLE``).
+        system = system or self._system or creation_styles.active()
         builder = Builder.new(
             voiceover=manifest.voiceover,
             duration=manifest.duration,
@@ -88,6 +109,8 @@ class AuthoringService:
             brief=brief,
             system=system,
             max_ops=max_ops,
+            artifacts_dir=self._artifacts_dir,
+            advisor=advisor,
         )
         result = loop.run()
 
@@ -105,7 +128,15 @@ class AuthoringService:
                 system=system,
                 max_ops=max_ops,
                 max_rounds=max_review_rounds,
+                artifacts_dir=self._artifacts_dir,
+                advisor=advisor,
             ).run()
+
+        if self._artifacts_dir is not None:
+            self._artifacts_dir.mkdir(parents=True, exist_ok=True)
+            (self._artifacts_dir / "composition.json").write_text(
+                builder.composition.model_dump_json(by_alias=True, indent=2), encoding="utf-8"
+            )
 
         return AuthoredComposition(
             composition=builder.composition,

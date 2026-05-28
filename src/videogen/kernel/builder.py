@@ -35,6 +35,7 @@ from videogen.kernel.composition import (
     Caption,
     CaptionStyle,
     Composition,
+    CropRect,
     LayoutName,
     Overlay,
     Ref,
@@ -192,6 +193,28 @@ class Builder:
             return _reject(ErrorCode.UNKNOWN_SCENE, f"no scene with id '{scene_id}'", scene_id)
         scene = self._composition.scenes[index]
         new_regions = {**scene.regions, region: Ref(asset=asset_id, in_point=in_point)}
+        new_scene = scene.model_copy(update={"regions": new_regions})
+        return self._commit(self._with_scene(index, new_scene), scene_id)
+
+    def set_crop(self, scene_id: str, region: RegionName, crop: CropRect) -> OpResult:
+        """Set the source crop window on a Region's existing fill (which sub-rect shows).
+
+        Updates the Region's ``Ref`` in place; the fill must already exist (call ``fill_region``
+        first) -- cropping an empty Region rejects. ``crop`` is a normalized window inside the
+        source (``CropRect`` enforces it lies within [0,1]); ``None`` is not a value here, clear a
+        crop by re-filling the region."""
+        index = self._scene_index(scene_id)
+        if index is None:
+            return _reject(ErrorCode.UNKNOWN_SCENE, f"no scene with id '{scene_id}'", scene_id)
+        scene = self._composition.scenes[index]
+        ref = scene.regions.get(region)
+        if ref is None:
+            return _reject(
+                ErrorCode.REGION_NOT_FILLED,
+                f"region '{region.value}' of scene '{scene_id}' has no fill to crop",
+                scene_id,
+            )
+        new_regions = {**scene.regions, region: ref.model_copy(update={"crop": crop})}
         new_scene = scene.model_copy(update={"regions": new_regions})
         return self._commit(self._with_scene(index, new_scene), scene_id)
 

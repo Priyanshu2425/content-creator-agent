@@ -22,7 +22,8 @@
       "src": "host.mp4",
       "content": "video",
       "in": null,
-      "rect": null
+      "rect": null,
+      "crop": null
     },
     {
       "start": 0.0,

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+import pytest
+
 from videogen.kernel.builder import Builder
 from videogen.kernel.composition import (
     Asset,
     AssetType,
     CaptionStyle,
+    CropRect,
     InsertOverlay,
     LayoutName,
     RegionName,
@@ -64,6 +67,30 @@ def test_simplest_talking_head_is_gate_clean() -> None:
     scene = b.get_scene("s0")
     assert scene is not None
     assert scene.regions[RegionName.full].asset == "host"
+
+
+def test_set_crop_narrows_an_existing_fill_and_stays_gate_clean() -> None:
+    b = _builder()
+    b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
+    b.fill_region("s0", RegionName.full, "host")
+    result = b.set_crop("s0", RegionName.full, CropRect(x=0.1, y=0.0, width=0.8, height=1.0))
+    assert result.ok and b.can_submit_render()
+    crop = b.get_scene("s0").regions[RegionName.full].crop  # type: ignore[union-attr]
+    assert crop == CropRect(x=0.1, y=0.0, width=0.8, height=1.0)
+
+
+def test_set_crop_on_an_unfilled_region_is_rejected_and_leaves_doc_unchanged() -> None:
+    b = _builder()
+    b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
+    result = b.set_crop("s0", RegionName.full, CropRect(x=0.0, y=0.0, width=1.0, height=1.0))
+    assert not result.ok
+    assert ErrorCode.REGION_NOT_FILLED in _codes(result.errors)
+    assert b.get_scene("s0").regions == {}  # type: ignore[union-attr]
+
+
+def test_crop_rect_rejects_a_window_outside_the_source() -> None:
+    with pytest.raises(ValueError):  # x + width > 1 is not a valid source sub-rect
+        CropRect(x=0.5, y=0.0, width=0.8, height=1.0)
 
 
 def test_add_scene_assigns_a_stable_id_when_omitted() -> None:

@@ -52,6 +52,7 @@ class ErrorCode(StrEnum):
     UNKNOWN_SCENE = "unknown_scene"
     UNKNOWN_CAPTION = "unknown_caption"
     DUPLICATE_SCENE_ID = "duplicate_scene_id"
+    REGION_NOT_FILLED = "region_not_filled"
 
 
 class WarningCode(StrEnum):
