@@ -1,0 +1,12 @@
+{
+  "authoring_client": "claude-code",
+  "authoring_model": null,
+  "creation_style": "split-broll",
+  "reviewer_model": "gemini-2.5-flash",
+  "advisor_model": "gemini-2.5-flash",
+  "max_review_rounds": 2,
+  "broll_fetch": true,
+  "broll_fetch_limit": 6,
+  "asset_descriptions": true,
+  "describer_model": "gemini-2.5-flash"
+}
