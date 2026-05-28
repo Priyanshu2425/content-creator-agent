@@ -129,16 +129,37 @@ class PerplexityBrollAgent:
             return []
 
     def _complete(self, system: str, user: str) -> str:
+        # Perplexity sonar models do not support {"type": "json_object"}; rely on the system
+        # prompt's JSON instruction and extract the object from free-text if needed.
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            response_format={"type": "json_object"},
             temperature=0.2,
         )
-        return response.choices[0].message.content or ""
+        return _extract_json(response.choices[0].message.content or "")
+
+
+def _extract_json(text: str) -> str:
+    """Return the first JSON object found in ``text``, or the raw text if none is found.
+
+    Perplexity may wrap the JSON in prose or a markdown code fence; this strips that wrapper
+    so the callers can always call ``json.loads`` on the result.
+    """
+    import re
+
+    # Strip ```json ... ``` or ``` ... ``` code fences.
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", text, re.DOTALL)
+    if fenced:
+        return fenced.group(1).strip()
+    # Fall back: find the outermost {...} block.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return text[start : end + 1]
+    return text
 
 
 def _download(link: _BrollLink, dest: Path, idx: int) -> Path | None:
