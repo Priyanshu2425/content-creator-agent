@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from math import gcd
 from typing import Protocol
 
 from videogen.kernel import resolver
@@ -27,7 +28,8 @@ from videogen.kernel.validator import ValidationResult, validate
 class AssetFact:
     """One asset as the agent perceives it: identity plus the objective probe facts (no creative
     interpretation, ADR 0003). ``duration``/``width``/``height`` are absent for assets that lack
-    them (e.g. a still image carries no duration)."""
+    them (e.g. a still image carries no duration). ``description`` and ``usage_advice`` are
+    populated by the optional GeminiDescribeAgent before authoring begins."""
 
     id: str
     type: str
@@ -35,6 +37,8 @@ class AssetFact:
     duration: float | None = None
     width: int | None = None
     height: int | None = None
+    description: str | None = None
+    usage_advice: str | None = None
 
 
 class Manifest(Protocol):
@@ -81,17 +85,50 @@ def assemble_perception(composition: Composition, manifest: Manifest) -> str:
     return "\n\n".join(sections)
 
 
+def _shape(width: int | None, height: int | None) -> str:
+    """A compact ``WxH (A:B portrait)`` descriptor so the agent can reason about fit, not just raw
+    pixels: the reduced aspect ratio plus an orientation word (the cue it needs to pick a layout).
+    """
+    if not width or not height:
+        return ""
+    divisor = gcd(width, height)
+    aspect = f"{width // divisor}:{height // divisor}"
+    if width > height:
+        orientation = "landscape"
+    elif width < height:
+        orientation = "portrait"
+    else:
+        orientation = "square"
+    return f" {width}x{height} ({aspect} {orientation})"
+
+
+def _canvas_line(manifest: Manifest) -> str | None:
+    """The output frame's shape, taken from the voiceover (host) asset -- the master that fixes the
+    canvas. The agent needs this to know how each asset will be cropped to ``cover`` a region."""
+    host = next((a for a in manifest.assets if a.id == manifest.voiceover), None)
+    if host is None or not host.width or not host.height:
+        return None
+    return f"output canvas:{_shape(host.width, host.height)}"
+
+
 def _manifest_section(manifest: Manifest) -> str:
     lines = [
         "## Media Manifest",
         f"voiceover: {manifest.voiceover} (master clock) · "
         f"duration {manifest.duration:.2f}s · {manifest.fps:.0f}fps",
-        "assets:",
     ]
+    canvas = _canvas_line(manifest)
+    if canvas is not None:
+        lines.append(canvas)
+    lines.append("assets:")
     for asset in manifest.assets:
-        dims = f" {asset.width}x{asset.height}" if asset.width and asset.height else ""
+        dims = _shape(asset.width, asset.height)
         dur = f" {asset.duration:.2f}s" if asset.duration is not None else ""
         lines.append(f"  {asset.id} · {asset.type} · {asset.source}{dims}{dur}")
+        if asset.description:
+            lines.append(f"    description: {asset.description}")
+        if asset.usage_advice:
+            lines.append(f"    usage advice: {asset.usage_advice}")
     words = len(manifest.transcript.words)
     lines.append(f"transcript ({words} words): {_transcript_text(manifest)}")
     return "\n".join(lines)

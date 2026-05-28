@@ -80,6 +80,17 @@ def test_packet_carries_every_perception_channel() -> None:
     assert resolver.timeline(comp, duration=4.0) in packet  # the resolver timeline verbatim
 
 
+def test_manifest_surfaces_aspect_orientation_and_the_output_canvas() -> None:
+    comp = _composition([_scene("s0", 0.0, 2.0)])
+
+    packet = assemble_perception(comp, manifest())
+
+    # the host asset's reduced aspect + orientation, so the agent can reason about fit (TODO 1)
+    assert "1080x1920 (9:16 portrait)" in packet
+    # the output frame shape, taken from the voiceover/host asset (what every region is cropped to)
+    assert "output canvas: 1080x1920 (9:16 portrait)" in packet
+
+
 def test_packet_reports_scene_overlap_as_an_error() -> None:
     comp = _composition([_scene("s0", 0.0, 2.0), _scene("s1", 1.0, 3.0)])
 
