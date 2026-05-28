@@ -145,7 +145,7 @@ class PerplexityBrollAgent:
             return []
 
         sources = _select_sources(categories)
-        links = self._fetch_links(queries, sources, _CANDIDATE_POOL)
+        links = self._fetch_links(queries, sources, _CANDIDATE_POOL, brief=brief, transcript=transcript)
         if not links:
             log.get().broll_fetch_warn("Perplexity returned no links")
             return []
@@ -187,12 +187,14 @@ class PerplexityBrollAgent:
             return [], ["stock"]
 
     def _fetch_links(
-        self, queries: list[str], sources: list[str], pool: int
+        self, queries: list[str], sources: list[str], pool: int, *, brief: str, transcript: str
     ) -> list[_BrollLink]:
         """Turn 2: search the web for URLs, restricting to the bucket-selected sources."""
         source_hint = ", ".join(sources)
         system = _TURN2_SYSTEM_TMPL.format(sources=source_hint)
         user = (
+            f"Brief:\n{brief}\n\n"
+            f"Transcript:\n{transcript}\n\n"
             f"Search for b-roll footage matching these queries:\n"
             f"{json.dumps(queries, indent=2)}\n\n"
             f"Return up to {pool} items total."
