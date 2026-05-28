@@ -22,6 +22,9 @@ from videogen import log
 
 _BASE_URL = "https://api.perplexity.ai"
 _DEFAULT_MODEL = "sonar-pro"
+# How many URL candidates to request from Perplexity. A large pool means the downloader can
+# skip broken/paywalled links and still fill the user's limit from working ones.
+_CANDIDATE_POOL = 100
 
 _TURN1_SYSTEM = """\
 You are a b-roll research assistant for short-form video production. Given a video brief and \
@@ -75,13 +78,17 @@ class PerplexityBrollAgent:
             log.get().broll_fetch_warn("no queries extracted from brief + transcript")
             return []
 
-        links = self._fetch_links(queries, limit)
+        # Always request a large candidate pool so enough working links exist to fill the limit.
+        links = self._fetch_links(queries, _CANDIDATE_POOL)
         if not links:
             log.get().broll_fetch_warn("Perplexity returned no links")
             return []
 
+        # Try candidates in order; stop as soon as ``limit`` downloads succeed.
         paths: list[Path] = []
-        for idx, link in enumerate(links[:limit]):
+        for idx, link in enumerate(links):
+            if len(paths) >= limit:
+                break
             out = _download(link, dest, idx)
             if out is not None:
                 log.get().broll_fetch_ok(link.url, str(out))
@@ -107,12 +114,12 @@ class PerplexityBrollAgent:
             log.get().broll_fetch_warn(f"turn-1 parse error (first 200 chars): {raw[:200]}")
             return []
 
-    def _fetch_links(self, queries: list[str], limit: int) -> list[_BrollLink]:
+    def _fetch_links(self, queries: list[str], pool: int) -> list[_BrollLink]:
         """Turn 2: search the web for URLs matching the extracted queries."""
         user = (
             f"Search for b-roll footage matching these queries:\n"
             f"{json.dumps(queries, indent=2)}\n\n"
-            f"Return up to {limit} items total."
+            f"Return up to {pool} items total."
         )
         raw = self._complete(_TURN2_SYSTEM, user)
         try:
