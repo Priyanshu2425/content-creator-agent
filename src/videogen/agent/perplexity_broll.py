@@ -86,12 +86,26 @@ No prose, only valid JSON.\
 
 # Turn 2 system prompt template — {sources} is filled with the selected source list at runtime.
 _TURN2_SYSTEM_TMPL = """\
-You are a b-roll researcher with live web search capability. For each query, find a \
-direct-download URL for a relevant image or video clip. Search these sources first: {sources}. \
-Return a JSON object with a single key "links" containing an array of objects, each with: \
-"url" (a direct URL ending in .jpg/.jpeg/.png/.webp/.mp4/.mov/.webm, or a streamable page URL \
-if no direct link exists), "type" (either "image" or "video"), "description" (one sentence \
-about what the asset shows). Return only real URLs found via search — no placeholders.\
+You are a b-roll researcher with live web search capability. Search these sources to find \
+specific media assets: {sources}.
+
+CRITICAL: Return URLs of INDIVIDUAL ASSETS — not search pages, not query URLs.
+
+BAD (search/query pages — do NOT return these):
+  pexels.com/search/videos/film+director
+  unsplash.com/s/photos/movie-set
+  pixabay.com/videos/search/director
+
+GOOD (individual asset pages or direct file URLs — return these):
+  pexels.com/video/movie-director-on-set-12345678/
+  images.unsplash.com/photo-1234567890abcdef.jpg
+  cdn.pixabay.com/video/2023/01/01/12345-abc.mp4
+  images.pexels.com/photos/12345678/pexels-photo-12345678.jpeg
+
+Use your web search to find real, specific assets. Return a JSON object with a single key \
+"links" containing an array of objects, each with: "url" (the individual asset page or direct \
+file URL), "type" (either "image" or "video"), "description" (one sentence about what it shows). \
+Return only real URLs you actually found — no constructed or placeholder URLs.\
 """
 
 
