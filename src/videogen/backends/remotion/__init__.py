@@ -48,6 +48,43 @@ class RemotionBackend:
         frame = round(t * ir.fps)
         return self._invoke("still", ir, Path(out_path), extra=[f"--frame={frame}"])
 
+    def render_clip(
+        self, composition_id: str, props: dict[str, Any], out_path: Path
+    ) -> Path:
+        """Render a standalone clip from a self-contained composition with simple props (not an IR).
+
+        Unlike render_video / render_still this does not accept an IR and does not stage media
+        assets -- the stat-viz compositions carry no external media references. Props are serialized
+        directly as JSON and passed via --props.
+        """
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            props_file = Path(tmp) / "props.json"
+            props_file.write_text(json.dumps(props))
+            argv = [
+                "npx",
+                "remotion",
+                "render",
+                self.ENTRY,
+                composition_id,
+                str(out_path),
+                f"--props={props_file}",
+            ]
+            result = subprocess.run(
+                argv, cwd=self.project_dir, capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"remotion render {composition_id} failed (exit {result.returncode}).\n"
+                    f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+                )
+        if not out_path.exists():
+            raise RuntimeError(
+                f"remotion render {composition_id} exited 0 but produced no file at {out_path}"
+            )
+        return out_path
+
     # --- internals ---
 
     def _invoke(self, command: str, ir: IR, out_path: Path, *, extra: list[str]) -> Path:

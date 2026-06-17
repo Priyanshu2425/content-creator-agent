@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Protocol
 
 from videogen import log
-from videogen.agent.loop import AuthoringLoop
+from videogen.agent.loop import DirectorLoop
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import Manifest
 from videogen.agent.prompts import SYSTEM_PROMPT
@@ -181,7 +181,7 @@ class FinalizationGate:
         so each edit is validated immediately and journaled like original authoring (story 16).
         """
         brief = format_feedback(feedback, round_index=round_index, total_rounds=self._max_rounds)
-        loop = AuthoringLoop(
+        loop = DirectorLoop(
             self._client,
             self._builder,
             self._manifest,

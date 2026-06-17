@@ -15,6 +15,7 @@ without a key or a network call.
 from __future__ import annotations
 
 import base64
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -119,6 +120,10 @@ class AnthropicModelClient:
         self._max_tokens = max_tokens
         self._client = client if client is not None else _build_client(api_key)
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def next_turn(
         self,
         *,
@@ -126,12 +131,23 @@ class AnthropicModelClient:
         history: Sequence[HistoryItem],
         tools: Sequence[ToolSpec],
     ) -> AssistantTurn:
+        from videogen import log
+
+        t0 = time.monotonic()
         message = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             system=system,
             tools=_to_tools(tools),
             messages=_to_messages(history),
+        )
+        log.get().llm_call(
+            agent="AnthropicModelClient",
+            model=message.model,
+            input_tokens=message.usage.input_tokens,
+            output_tokens=message.usage.output_tokens,
+            stop_reason=message.stop_reason,
+            duration_ms=int((time.monotonic() - t0) * 1000),
         )
         return _parse_response(message)
 

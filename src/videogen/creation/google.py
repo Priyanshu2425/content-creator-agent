@@ -14,7 +14,6 @@ defaults; override per call site as Google's generally-available model names mov
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -73,12 +72,11 @@ class GoogleMediaCreator:
 
 
 def _build_client(api_key: str | None) -> Any:
-    try:
-        import google.genai as genai
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "media creation needs the google-genai SDK; install it with "
-            "`uv sync --extra creation` and set GEMINI_API_KEY (or GOOGLE_API_KEY)"
-        ) from exc
-    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    return genai.Client(api_key=key) if key else genai.Client()
+    from videogen.genai_client import build_genai_client
+
+    return build_genai_client(
+        api_key,
+        install_hint=(
+            "media creation needs the google-genai SDK; install it with `uv sync --extra creation`, then authenticate via ADC (GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT) or an API key"
+        ),
+    )

@@ -61,6 +61,45 @@ class TransitionKind(StrEnum):
     whoosh = "whoosh"  # hard visual cut + whoosh SFX at the boundary (audio wired in later)
 
 
+class SoundKind(StrEnum):
+    """The three SFX a cut may carry. Assigned by AudioDeciderAgent after authoring."""
+
+    click = "click"
+    whoosh = "whoosh"
+    dramatic_whoosh = "dramatic_whoosh"
+
+
+class _Model_pre(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class _AudioBudget(_Model_pre):
+    click: int = 0
+    whoosh: int = 0
+    dramatic_whoosh: int = 0
+
+
+class SceneAudio(_Model_pre):
+    """Sound-effect annotation added by AudioDeciderAgent after the authoring loop completes."""
+
+    sound: SoundKind
+    reason: str
+    budget_used: _AudioBudget
+
+
+class AudioBudgetSummary(_Model_pre):
+    """Top-level budget report appended by AudioDeciderAgent."""
+
+    total_cuts: int
+    click_count: int
+    whoosh_count: int
+    dramatic_whoosh_count: int
+    click_pct: int
+    whoosh_pct: int
+    dramatic_whoosh_pct: int
+    budget_warnings: list[str] = Field(default_factory=list)
+
+
 class _Model(BaseModel):
     # extra=forbid rejects unknown/misspelled fields; populate_by_name lets Python use the
     # field name while JSON carries the glossary alias (e.g. `in`, `afterScene`).
@@ -135,6 +174,7 @@ class Scene(_Model):
     layout: LayoutName
     regions: dict[RegionName, Ref] = Field(default_factory=dict)
     layout_params: dict[str, float] = Field(default_factory=dict)
+    audio: SceneAudio | None = None  # set by AudioDeciderAgent after authoring
 
 
 class Transition(_Model):
@@ -210,10 +250,24 @@ class InsertOverlay(AdditiveOverlay):
     fade: float = 0.0  # opacity ramp in/out, seconds
 
 
+class TitleOverlay(AdditiveOverlay):
+    """A static text headline -- the **text hook** -- painted over the opening (texthook/01).
+
+    Distinct from a Caption: not transcript-synced and not word-animated, it is a single static
+    headline on frame one (the muted scroller / paused thumbnail). Carries its ``text`` and a coarse
+    vertical ``placement`` (upper-third or center); the brand-kit display font/color are baked in by
+    the compiler. Additive: painted in the z stack, never a transform of base content.
+    """
+
+    type: Literal["title"] = "title"
+    text: str
+    placement: Literal["upper-third", "center"] = "upper-third"
+
+
 # Adding an action = adding a member here (registry-driven in Phase 5); the Envelope is fixed.
 # An unknown `type` fails discriminator validation -> error by default (strict mode).
 Overlay = Annotated[
-    ZoomOverlay | PanOverlay | InsertOverlay,
+    ZoomOverlay | PanOverlay | InsertOverlay | TitleOverlay,
     Field(discriminator="type"),
 ]
 
@@ -221,14 +275,32 @@ Overlay = Annotated[
 # --- captions (dedicated track, not overlays) ---
 
 
+class CaptionWord(_Model):
+    """One word within a caption line, with its own spoken window on the master clock.
+
+    Carried so a caption can render as a single *line* whose current word is highlighted
+    (karaoke-style), instead of flashing one word at a time."""
+
+    text: str
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+
+
 class Caption(_Model):
-    """A transcript-synced text cue on the dedicated `captions` track."""
+    """A transcript-synced text cue on the dedicated `captions` track.
+
+    A caption is a **line**: ``text`` is the whole line and ``words`` carries each word's spoken
+    window so the renderer can highlight the word being said right now. ``start``/``end`` span the
+    line (first word's start to last word's end). ``words`` may be empty for a plain single cue
+    (e.g. a manually-added emphasis caption), in which case the whole line renders without a moving
+    highlight."""
 
     text: str
     start: float = Field(ge=0)
     end: float = Field(ge=0)
     style: CaptionStyle = CaptionStyle.pill
     z: int = 100  # high z by convention so captions sit on top
+    words: tuple[CaptionWord, ...] = ()
 
 
 # --- root ---
@@ -249,3 +321,4 @@ class Composition(_Model):
     transitions: list[Transition] = Field(default_factory=list)
     overlays: list[Overlay] = Field(default_factory=list)
     captions: list[Caption] = Field(default_factory=list)
+    audio_budget_summary: AudioBudgetSummary | None = None  # set by AudioDeciderAgent

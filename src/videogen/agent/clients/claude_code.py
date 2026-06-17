@@ -4,7 +4,7 @@ Motivation: drive the authoring loop with the user's *Claude Code CLI auth* inst
 ``ANTHROPIC_API_KEY`` -- no per-token billing, no separate API rate limits (ADR 0006).
 
 The Claude Agent SDK is an agent *harness*: it owns its own tool-use loop, executes tools
-in-process, and runs async-only. That is the opposite shape of our seam, where the AuthoringLoop
+in-process, and runs async-only. That is the opposite shape of our seam, where the DirectorLoop
 owns the loop and the ModelClient only proposes one turn (ADR 0004). We reconcile the two by using
 the SDK as a single-turn JSON generator: each ``next_turn`` runs a one-shot ``query`` with
 ``max_turns=1`` and no SDK tools, serializes the neutral history plus the tool schemas into the
@@ -86,11 +86,13 @@ def _system_with_contract(system: str, tools: Sequence[ToolSpec]) -> str:
     )
 
 
-def _render_prompt(history: Sequence[HistoryItem]) -> str:
+def _render_prompt(history: Sequence[HistoryItem], *, with_tool_instruction: bool = True) -> str:
     """Serialize the running neutral history into a single transcript prompt.
 
     Each turn is one-shot, so the whole conversation is replayed every time (the loop already
     maintains it). Images are dropped with a note -- this client perceives via text only.
+    ``with_tool_instruction`` should be False when no tools are offered (free-text agents like
+    IdealCutsAgent and AudioDeciderAgent) so the model is not told to emit a JSON tool call.
     """
     lines: list[str] = []
     for item in history:
@@ -110,7 +112,8 @@ def _render_prompt(history: Sequence[HistoryItem]) -> str:
                         f"[{len(result.images)} image(s) omitted -- author from the text "
                         "perception above]"
                     )
-    lines.append(_NEXT_INSTRUCTION)
+    if with_tool_instruction:
+        lines.append(_NEXT_INSTRUCTION)
     return "\n\n".join(lines)
 
 
@@ -132,13 +135,19 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _parse_turn(text: str) -> AssistantTurn:
-    """Parse the model's JSON tool call into a one-call AssistantTurn (empty if unparseable)."""
+    """Parse the model's response into an AssistantTurn.
+
+    When the model emits a JSON tool call (authoring loop), extract it into tool_calls.
+    When the model emits free text (single-turn agents like IdealCuts, AudioDecider), preserve
+    it in AssistantTurn.text so the caller can read it. The two cases are mutually exclusive:
+    a tool call turn has no text, a free-text turn has no tool calls.
+    """
     data = _extract_json(text)
     if data is None:
-        return AssistantTurn()
+        return AssistantTurn(text=text or None)
     name = data.get("name")
     if not isinstance(name, str) or not name:
-        return AssistantTurn()
+        return AssistantTurn(text=text or None)
     raw_args = data.get("args")
     args: dict[str, object] = raw_args if isinstance(raw_args, dict) else {}
     return AssistantTurn(tool_calls=(ToolCall(id=uuid.uuid4().hex[:8], name=name, args=args),))
@@ -214,6 +223,10 @@ class ClaudeCodeClient:
         self._model = model
         self._query_fn: QueryFn = query_fn if query_fn is not None else _sdk_query
 
+    @property
+    def model(self) -> str | None:
+        return self._model
+
     def next_turn(
         self,
         *,
@@ -221,10 +234,25 @@ class ClaudeCodeClient:
         history: Sequence[HistoryItem],
         tools: Sequence[ToolSpec],
     ) -> AssistantTurn:
+        import time
+        from videogen import log
+
         visible = _visible_tools(tools)
-        full_system = _system_with_contract(system, visible)
-        prompt = _render_prompt(history)
+        # When no tools are offered the agent expects free text (ideal-cuts plan, audio JSON,
+        # etc.) — skip the JSON-only output contract so the model answers naturally.
+        if visible:
+            full_system = _system_with_contract(system, visible)
+            prompt = _render_prompt(history, with_tool_instruction=True)
+        else:
+            full_system = system
+            prompt = _render_prompt(history, with_tool_instruction=False)
+        t0 = time.monotonic()
         text = asyncio.run(
             _collect(self._query_fn, prompt=prompt, system=full_system, model=self._model)
+        )
+        log.get().llm_call(
+            agent="ClaudeCodeClient",
+            model=self._model or "default",
+            duration_ms=int((time.monotonic() - t0) * 1000),
         )
         return _parse_turn(text)

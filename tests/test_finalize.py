@@ -200,7 +200,7 @@ class _FakeAdvisor:
 
 
 def test_advisor_reaches_the_edit_round_loop_for_a_blind_client(tmp_path: Path) -> None:
-    # A blind client driven through a blocking round: the per-round AuthoringLoop must still offer
+    # A blind client driven through a blocking round: the per-round DirectorLoop must still offer
     # it consult_placement, i.e. the advisor is threaded into _apply_edits (ADR 0007).
     backend = CountingBackend()
     renderer = FakeRenderer(backend, tmp_path)

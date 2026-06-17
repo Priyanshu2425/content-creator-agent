@@ -30,7 +30,8 @@ claude-code = ["claude-agent-sdk>=0.1"]
 # Media creation providers (TODO 3, scaffolding): image/video via google-genai (Imagen + Veo),
 # audio via elevenlabs. Imported lazily in creation/*; not wired into the loop yet.
 creation = ["elevenlabs>=1.0", "google-genai>=0.3"]
-live = ["videogen[transcribe,authoring,review,openai,claude-code,creation]"]
+tracing = ["langfuse>=3.0"]
+live = ["videogen[transcribe,authoring,review,openai,claude-code,creation,tracing]"]
 
 [project.scripts]
 # Reserved now; the command body lands in Phase 9 (see app/cli.py).

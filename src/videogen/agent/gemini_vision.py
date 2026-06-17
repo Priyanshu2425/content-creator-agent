@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from videogen import tracing
 from videogen.agent.prompts import ADVICE_SYSTEM_PROMPT
 
 # A fast, vision-capable default; override per run for a stronger advisor. The loop is indifferent.
@@ -46,20 +47,28 @@ class GeminiVisionAdvisor:
         # Inline image part (PartDict shape) -- avoids importing the SDK types here, so the
         # deterministic tests run against a fake client with no google-genai installed.
         image_part = {"inline_data": {"mime_type": "image/png", "data": image}}
-        response = self._client.models.generate_content(
+        with tracing.model_generation(
+            "gemini-vision-advise",
+            system=ADVICE_SYSTEM_PROMPT,
+            user_message=question[:300],
             model=self._model,
-            contents=[image_part, _advice_prompt(question, context)],
-            config={"system_instruction": ADVICE_SYSTEM_PROMPT},
-        )
-        return response.text or ""
+        ):
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=[image_part, _advice_prompt(question, context)],
+                config={"system_instruction": ADVICE_SYSTEM_PROMPT},
+            )
+        advice = response.text or ""
+        tracing.update_generation_output(advice[:500])
+        return advice
 
 
 def _build_client(api_key: str | None) -> Any:
-    try:
-        import google.genai as genai
-    except ModuleNotFoundError as exc:  # optional dependency
-        raise RuntimeError(
-            "the vision advisor needs the google-genai SDK; install it with "
-            "`uv sync --extra review` and set GOOGLE_API_KEY (or GEMINI_API_KEY)"
-        ) from exc
-    return genai.Client(api_key=api_key) if api_key else genai.Client()
+    from videogen.genai_client import build_genai_client
+
+    return build_genai_client(
+        api_key,
+        install_hint=(
+            "the vision advisor needs the google-genai SDK; install it with `uv sync --extra review`, then authenticate via ADC (GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT) or an API key"
+        ),
+    )

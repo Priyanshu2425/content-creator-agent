@@ -33,16 +33,19 @@ _PROPS: dict[CaptionStyle, TextStyle] = {
         border_radius=24,
         padding_x=40,
         padding_y=18,
+        highlight_color="#FFE14D",  # the word being spoken pops yellow on the dark pill
     ),
     CaptionStyle.word_bold: TextStyle(
         font_size=76,
         font_weight=800,
-        color="#FFFFFF",  # plain white emphasis word, no pill
+        color="#FFFFFF",  # plain white line; active word in accent
+        highlight_color="#FFE14D",
     ),
     CaptionStyle.kinetic: TextStyle(
         font_size=120,
         font_weight=900,
-        color="#FFE14D",  # large pop-in key word
+        color="#FFFFFF",  # large line; active word pops accent
+        highlight_color="#FFE14D",
     ),
 }
 

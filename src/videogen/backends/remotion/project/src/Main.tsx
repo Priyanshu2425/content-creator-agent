@@ -96,7 +96,33 @@ const TextLayerView: React.FC<{ layer: TextLayer; from: number }> = ({ layer, fr
   const opacity = sample(layer.opacity, frame, fps, 1);
   const scale = sample(layer.transform?.scale, frame, fps, 1);
   const p = layer.props;
-  const text = layer.runs.map((run) => run.text).join(" ");
+  const timeS = frame / fps; // absolute seconds, for matching a run's spoken window
+  // Karaoke when any run carries timing: render one line of word-spans and highlight the word
+  // whose [start, end] window contains the current time. Otherwise render the joined line.
+  const karaoke = layer.runs.some((run) => run.start != null);
+  const body = karaoke ? (
+    layer.runs.map((run, i) => {
+      const active =
+        run.start != null && run.end != null && timeS >= run.start && timeS < run.end;
+      const highlight = active && p.highlight_color ? p.highlight_color : p.color;
+      return (
+        <span
+          key={i}
+          style={{
+            display: "inline-block",
+            margin: "0 0.16em",
+            color: highlight,
+            transform: active ? "scale(1.14)" : "scale(1)",
+            textShadow: active ? "0 0 18px rgba(0,0,0,0.45)" : undefined,
+          }}
+        >
+          {run.text}
+        </span>
+      );
+    })
+  ) : (
+    <>{layer.runs.map((run) => run.text).join(" ")}</>
+  );
   return (
     <AbsoluteFill
       style={{
@@ -121,7 +147,7 @@ const TextLayerView: React.FC<{ layer: TextLayer; from: number }> = ({ layer, fr
           padding: `${p.padding_y}px ${p.padding_x}px`,
         }}
       >
-        {text}
+        {body}
       </div>
     </AbsoluteFill>
   );

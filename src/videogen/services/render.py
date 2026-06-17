@@ -32,6 +32,7 @@ from videogen.backends.base import RenderBackend
 from videogen.backends.remotion import RemotionBackend
 from videogen.kernel.compile_ir import compile_ir
 from videogen.kernel.composition import Composition
+from videogen.kernel.ir import IR
 from videogen.kernel.validator import validate_local
 from videogen.stores.blobs import BlobStore, FilesystemBlobStore
 
@@ -129,6 +130,10 @@ class RenderService:
         try:
             self._set(job_id, state=JobState.running, progress=0.05)
             ir = compile_ir(composition, fps=fps, duration=duration)
+            # Persist the exact IR this render rasterises, as a sidecar next to the output, so a
+            # black/blank frame can be diagnosed from each layer's resolved src and content kind
+            # (the audio-decider's annotations are already folded into `composition` here).
+            self._dump_ir(out_name, ir, composition)
             self._set(job_id, progress=_PROGRESS_COMPILED)
             with tempfile.TemporaryDirectory() as scratch:
                 rendered = self._backend.render_video(ir, Path(scratch) / out_name)
@@ -137,6 +142,23 @@ class RenderService:
             self._set(job_id, state=JobState.done, progress=1.0, artifact=location)
         except Exception as exc:  # noqa: BLE001 - any failure becomes a terminal failed status
             self._set(job_id, state=JobState.failed, error=str(exc))
+
+    def _dump_ir(self, out_name: str, ir: IR, composition: Composition) -> None:
+        """Persist the rendered composition and compiled IR as JSON sidecars next to ``out_name``.
+
+        Best-effort debug artifacts: a failure to write them must never fail the render itself.
+        """
+        stem = Path(out_name).stem
+        try:
+            self._blobs.write_text(
+                f"{stem}.composition.json",
+                composition.model_dump_json(by_alias=True, indent=2),
+            )
+            self._blobs.write_text(
+                f"{stem}.ir.json", ir.model_dump_json(by_alias=True, indent=2)
+            )
+        except Exception:  # noqa: BLE001 - diagnostics are non-fatal; never fail a render over them
+            pass
 
     def _set(self, job_id: str, **changes: object) -> None:
         """Atomically replace a job's snapshot with an updated one (registry stays untorn)."""

@@ -140,12 +140,33 @@ def test_add_captions_from_transcript_maps_words_to_absolute_seconds() -> None:
     result = b.add_captions_from_transcript(transcript, style=CaptionStyle.word_bold)
     assert result.ok
     caps = b.composition.captions
-    assert [(c.text, c.start, c.end) for c in caps] == [
+    # the three words (no pause over the line-break gap, under the word cap) form one karaoke line
+    assert len(caps) == 1
+    assert caps[0].text == "hello world now"
+    assert caps[0].start == 0.2 and caps[0].end == 1.4
+    assert [(w.text, w.start, w.end) for w in caps[0].words] == [
         ("hello", 0.2, 0.5),
         ("world", 0.5, 0.9),
         ("now", 1.0, 1.4),
     ]
-    assert all(c.style == CaptionStyle.word_bold for c in caps)
+    assert caps[0].style == CaptionStyle.word_bold
+
+
+def test_add_captions_breaks_lines_on_a_natural_pause() -> None:
+    b = _builder()
+    b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
+    b.fill_region("s0", RegionName.full, "host")
+    transcript = Transcript(
+        words=[
+            Word(text="hello", start=0.2, end=0.5),
+            Word(text="world", start=0.5, end=0.9),
+            Word(text="again", start=2.0, end=2.4),  # 1.1s pause -> new line
+        ]
+    )
+    result = b.add_captions_from_transcript(transcript)
+    assert result.ok
+    caps = b.composition.captions
+    assert [c.text for c in caps] == ["hello world", "again"]
 
 
 # --- per-op validation + transactional rollback (user stories 6, 31) ---
@@ -394,3 +415,52 @@ def test_add_overlay_rejects_a_dangling_insert_asset() -> None:
     result = b.add_overlay(InsertOverlay(start=1.0, end=2.0, target=RegionName.full, asset="ghost"))
     assert not result.ok
     assert ErrorCode.DANGLING_ASSET in _codes(result.errors)
+
+
+# --- add_asset: registering worker-generated assets mid-run (restructure/03, ADR 0008) --------
+
+
+def test_add_asset_registers_a_new_asset_into_the_library() -> None:
+    builder = Builder.new(voiceover="host", duration=DURATION, assets={
+        "host": Asset(type=AssetType.video, src="host.mp4"),
+    })
+    result = builder.add_asset("broll_1", Asset(type=AssetType.image, src="broll_1.png"))
+
+    assert result.ok
+    assert builder.composition.assets["broll_1"].src == "broll_1.png"
+
+
+def test_add_asset_rejects_a_duplicate_id_and_leaves_the_library_untouched() -> None:
+    builder = Builder.new(voiceover="host", duration=DURATION, assets={
+        "host": Asset(type=AssetType.video, src="host.mp4"),
+    })
+    result = builder.add_asset("host", Asset(type=AssetType.image, src="other.png"))
+
+    assert not result.ok
+    assert any(e.code is ErrorCode.DUPLICATE_ASSET_ID for e in result.errors)
+    assert builder.composition.assets["host"].src == "host.mp4"  # unchanged
+
+
+# --- set_scene_audio: cut-bound SFX placement (sfx/02, ADR 0009) -------------------------------
+
+
+def test_set_scene_audio_attaches_a_sound_to_a_cut() -> None:
+    builder = Builder.new(voiceover="host", duration=DURATION, assets={
+        "host": Asset(type=AssetType.video, src="host.mp4"),
+    })
+    builder.add_scene(LayoutName.full, 0.0, 2.0, id="s0")
+    result = builder.set_scene_audio("s0", "whoosh", reason="b-roll entry")
+
+    assert result.ok
+    scene = builder.get_scene("s0")
+    assert scene is not None and scene.audio is not None
+    assert scene.audio.sound.value == "whoosh"
+
+
+def test_set_scene_audio_rejects_an_unknown_scene() -> None:
+    builder = Builder.new(voiceover="host", duration=DURATION, assets={
+        "host": Asset(type=AssetType.video, src="host.mp4"),
+    })
+    result = builder.set_scene_audio("nope", "click")
+    assert not result.ok
+    assert any(e.code is ErrorCode.UNKNOWN_SCENE for e in result.errors)

@@ -21,7 +21,7 @@
       "kind": "media",
       "src": "host.mp4",
       "content": "video",
-      "in": null,
+      "in": 0.0,
       "rect": null,
       "crop": null
     },
@@ -61,7 +61,9 @@
       "runs": [
         {
           "text": "hello there",
-          "emphasis": false
+          "emphasis": false,
+          "start": null,
+          "end": null
         }
       ],
       "style": "pill",
@@ -72,7 +74,8 @@
         "background": "rgba(17,24,39,0.85)",
         "border_radius": 24,
         "padding_x": 40,
-        "padding_y": 18
+        "padding_y": 18,
+        "highlight_color": "#FFE14D"
       }
     },
     {
@@ -93,7 +96,9 @@
       "runs": [
         {
           "text": "this",
-          "emphasis": true
+          "emphasis": true,
+          "start": null,
+          "end": null
         }
       ],
       "style": "word-bold",
@@ -104,7 +109,8 @@
         "background": null,
         "border_radius": 0,
         "padding_x": 0,
-        "padding_y": 0
+        "padding_y": 0,
+        "highlight_color": "#FFE14D"
       }
     },
     {
@@ -147,18 +153,21 @@
       "runs": [
         {
           "text": "matters",
-          "emphasis": true
+          "emphasis": true,
+          "start": null,
+          "end": null
         }
       ],
       "style": "kinetic",
       "props": {
         "font_size": 120,
         "font_weight": 900,
-        "color": "#FFE14D",
+        "color": "#FFFFFF",
         "background": null,
         "border_radius": 0,
         "padding_x": 0,
-        "padding_y": 0
+        "padding_y": 0,
+        "highlight_color": "#FFE14D"
       }
     }
   ]

@@ -17,6 +17,7 @@ from videogen.agent.tools import DRAFT_OPS, DRAFT_TOOLS, TOOLS
 from videogen.creation.base import AudioKind
 from videogen.creation.elevenlabs import ElevenLabsAudioCreator
 from videogen.creation.google import GoogleMediaCreator
+from videogen.creation.nano_banana import NanoBananaCreator
 
 
 class _FakeImages:
@@ -77,6 +78,35 @@ def test_google_create_video_polls_the_operation_then_writes(tmp_path: Path) -> 
 
     assert out.read_bytes() == b"fake-mp4"
     assert ops.gets == 1  # polled once after the not-done first response
+
+
+class _FakeImageGen:
+    """Fake Nano Banana: records the generate_content kwargs, returns inline image bytes."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict[str, Any] = {}
+
+    def generate_content(self, **kwargs: Any) -> Any:
+        self.kwargs = kwargs
+        part = SimpleNamespace(inline_data=SimpleNamespace(data=b"\x89PNG-nano"))
+        content = SimpleNamespace(parts=[part])
+        return SimpleNamespace(candidates=[SimpleNamespace(content=content)])
+
+
+def test_nano_banana_create_image_writes_inline_bytes_with_aspect_ratio(tmp_path: Path) -> None:
+    gen = _FakeImageGen()
+    client = SimpleNamespace(models=gen)
+    creator = NanoBananaCreator(model="gemini-2.5-flash-image", client=client)
+
+    out = creator.create_image(
+        prompt="bold stat card: 92%", out_path=tmp_path / "slot.png", aspect_ratio="9:16"
+    )
+
+    assert out.read_bytes() == b"\x89PNG-nano"
+    assert gen.kwargs["model"] == "gemini-2.5-flash-image"
+    assert gen.kwargs["contents"] == ["bold stat card: 92%"]
+    assert gen.kwargs["config"]["response_modalities"] == ["IMAGE"]
+    assert gen.kwargs["config"]["image_config"]["aspect_ratio"] == "9:16"
 
 
 class _FakeTTS:

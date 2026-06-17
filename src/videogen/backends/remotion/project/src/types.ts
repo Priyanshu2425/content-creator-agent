@@ -25,6 +25,8 @@ export interface Transform {
 export interface TextRun {
   text: string;
   emphasis: boolean;
+  start?: number | null; // word's spoken window (absolute seconds); null = static run
+  end?: number | null;
 }
 
 // Compiled visual properties of a caption. The compiler bakes the style (pill | word-bold |
@@ -37,6 +39,7 @@ export interface TextStyle {
   border_radius: number; // px
   padding_x: number; // px
   padding_y: number; // px
+  highlight_color?: string | null; // active-word fill for karaoke runs; null/absent = no highlight
 }
 
 interface LayerBase {

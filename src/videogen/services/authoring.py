@@ -21,9 +21,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from videogen import log
 from videogen.agent import creation_styles
-from videogen.agent.loop import AuthoringLoop
+from videogen.agent.loop import DirectorLoop
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import Manifest
 from videogen.agent.review import ReviewAgent
@@ -88,6 +90,9 @@ class AuthoringService:
         max_ops: int = 40,
         max_review_rounds: int = 2,
         system: str | None = None,
+        dispatchers: dict[str, Any] | None = None,
+        brand_kit: Any = None,
+        timeline_skeleton: str = "",
     ) -> AuthoredComposition:
         # Precedence: an explicit call argument, then the service's configured style, then the
         # active default style (``creation_styles.DEFAULT_STYLE``).
@@ -99,7 +104,7 @@ class AuthoringService:
         )
         store = CompositionStore()
         doc_id = store.open(builder.composition)
-        loop = AuthoringLoop(
+        loop = DirectorLoop(
             model_client,
             builder,
             manifest,
@@ -111,8 +116,27 @@ class AuthoringService:
             max_ops=max_ops,
             artifacts_dir=self._artifacts_dir,
             advisor=advisor,
+            dispatchers=dispatchers,
+            brand_kit=brand_kit,
+            timeline_skeleton=timeline_skeleton,
         )
         result = loop.run()
+
+        # Behavioral pacing pass (ADR 0008): the Director fills static gaps with content-free zoom
+        # punch-ins before the document is reviewed/rendered. Pacing stays the Director's judgment,
+        # not a kernel-enforced rule; this acts on the gaps the reconciler finds.
+        from videogen.agent.pacing import analyze_pacing, fill_static_gaps
+
+        filled = fill_static_gaps(builder, duration=manifest.duration)
+        pacing_report = analyze_pacing(builder.composition, duration=manifest.duration)
+        log.get().agent_event_complete(
+            "pacing-pass",
+            duration_ms=0,
+            punch_ins_added=filled,
+            remaining_gaps=len(pacing_report.gaps),
+            collisions=len(pacing_report.collisions),
+            safe_zone_violations=len(pacing_report.safe_zone_violations),
+        )
 
         finalization: FinalizationResult | None = None
         if reviewer is not None and renderer is not None:

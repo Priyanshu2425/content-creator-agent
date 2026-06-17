@@ -66,10 +66,14 @@ class Rect(_Model):
 
 
 class TextRun(_Model):
-    """A span of caption text; `emphasis` marks the word-bold / kinetic key word."""
+    """A span of caption text. `emphasis` marks a statically-bold word; `start`/`end` (absolute
+    seconds) give the word's spoken window so the backend can highlight the word being said *now*
+    (karaoke). Both timings are None for a static run (a title, or a plain single-cue caption)."""
 
     text: str
     emphasis: bool = False
+    start: float | None = None
+    end: float | None = None
 
 
 class TextStyle(_Model):
@@ -89,6 +93,7 @@ class TextStyle(_Model):
     border_radius: int = Field(default=0, ge=0)  # px; the pill's rounding
     padding_x: int = Field(default=0, ge=0)  # px; horizontal padding inside the pill
     padding_y: int = Field(default=0, ge=0)  # px; vertical padding inside the pill
+    highlight_color: str | None = None  # active-word fill for karaoke runs; None = no highlight
 
 
 # --- layers: common fields + discriminated union on `kind` ---

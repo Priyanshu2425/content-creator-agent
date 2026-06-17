@@ -29,26 +29,30 @@ class Settings(BaseModel):
 
     # Which authoring ModelClient drives the loop. Known names are the keys of
     # ``cli._AUTHORING_CLIENTS`` (claude-code, gemini, anthropic, nvidia, perplexity).
-    authoring_client: str = "claude-code"
+    authoring_client: str = "gemini"
     # The model id for that client. ``null`` keeps the client's own default (e.g. claude-code ->
     # claude-sonnet-4-6; claude-code with null also follows the CLI's configured model).
     authoring_model: str | None = None
     # The creation style (system prompt) to author under. Known names are the keys of
     # ``creation_styles.STYLES`` (classic, split-broll).
     creation_style: str = "classic"
+    # Which reviewer runs the finalization gate: "claude" reads the final Composition JSON via Claude
+    # Code (structural/editorial review, the default); "gemini" watches the rendered mp4 for motion
+    # issues. Gemini stays available -- this only chooses the default.
+    review_client: str = "gemini"
     # The Gemini model for the full-motion review sub-agent and the placement advisor.
-    reviewer_model: str = "gemini-2.5-flash"
+    reviewer_model: str = "gemini-2.5-flash-lite"
     advisor_model: str = "gemini-2.5-flash"
+    # Nano Banana (Gemini 2.5 Flash Image) — the still-image model for GenerateBrollAgent.
+    broll_image_model: str = "gemini-2.5-flash-image"
     # The finalization gate's bounded render -> review -> edit round cap.
     max_review_rounds: int = 2
-    # Perplexity b-roll fetch: when true, sonar-pro searches the web for relevant images/videos
-    # and injects them into the manifest before authoring. Requires PERPLEXITY_API_KEY.
-    broll_fetch: bool = False
-    broll_fetch_limit: int = 6
+    # Target platform for IdealCutsAgent and GenerateBrollAgent (e.g. Instagram, TikTok, Shorts).
+    platform: str = "Instagram"
     # Gemini asset describer: when true, every non-voiceover asset is described before authoring.
     # Requires GOOGLE_API_KEY / GEMINI_API_KEY. Provides description + usage_advice per asset.
     asset_descriptions: bool = False
-    describer_model: str = "gemini-2.5-flash"
+    describer_model: str = "gemini-2.5-flash-lite"
 
 
 def load_settings(path: Path | None = None) -> Settings:

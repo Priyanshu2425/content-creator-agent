@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from videogen.agent.perception import Manifest, MediaManifest
-from videogen.app.cli import Pipeline, PipelineError, main
+from videogen.app.cli import Pipeline, PipelineError, expand_broll_paths, main
 from videogen.kernel.builder import Builder
 from videogen.kernel.composition import Asset, AssetType, Composition, LayoutName, RegionName
 from videogen.services.authoring import AuthoredComposition
@@ -77,6 +77,9 @@ class FakeAuthoring:
         renderer: object | None = None,
         advisor: object | None = None,
         max_review_rounds: int = 2,
+        dispatchers: dict | None = None,
+        brand_kit: object | None = None,
+        timeline_skeleton: str = "",
     ) -> AuthoredComposition:
         self.calls.append("author")
         self.manifest = manifest
@@ -97,6 +100,17 @@ class FakeAuthoring:
             ops_used=2,
             journal=(),
         )
+
+
+class FakeDescriber:
+    """Records describe_all calls; returns empty descriptions."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def describe_all(self, assets, *, brief: str, transcript: str) -> dict:
+        self.calls.append(f"describe:{len(assets)}")
+        return {}
 
 
 class FakeRenderer:
@@ -228,6 +242,90 @@ def test_main_requires_host() -> None:
     with pytest.raises(SystemExit) as exc:  # argparse exits non-zero on a missing required flag
         main(["make", "--brief", "no host given"])
     assert exc.value.code != 0
+
+
+def test_expand_broll_folder_one_level_sorted(tmp_path: Path) -> None:
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "z_last.png").write_bytes(b"x")
+    (pack / "a_first.mp4").write_bytes(b"x")
+    (pack / "nested").mkdir()
+    (pack / "nested" / "hidden.mp4").write_bytes(b"x")
+    (pack / "readme.txt").write_bytes(b"skip")
+
+    paths = expand_broll_paths([str(pack)])
+
+    assert paths == [str((pack / "a_first.mp4").resolve()), str((pack / "z_last.png").resolve())]
+
+
+def test_expand_broll_preserves_comma_order_with_folder(tmp_path: Path) -> None:
+    hook = tmp_path / "hook.png"
+    hook.write_bytes(b"x")
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "b.mp4").write_bytes(b"x")
+
+    paths = expand_broll_paths([str(hook), str(pack)])
+
+    assert paths[0] == str(hook.resolve())
+    assert paths[1] == str((pack / "b.mp4").resolve())
+
+
+def test_main_authoring_only_requires_broll() -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["make", "--authoring-only", "--host", "h.mp4", "--brief", "x"])
+    assert exc.value.code == 2
+
+
+def test_main_authoring_only_requires_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "make",
+                "--authoring-only",
+                "--host",
+                "h.mp4",
+                "--broll",
+                "a.png",
+                "--brief",
+                "x",
+            ]
+        )
+    assert exc.value.code == 2
+
+
+def test_authoring_only_runs_describe_not_ideal_cuts(tmp_path: Path) -> None:
+    calls: list[str] = []
+    media = FakeMedia(calls)
+    authoring = FakeAuthoring(calls)
+    renderer = FakeRenderer(calls, tmp_path / "final.mp4")
+    describer = FakeDescriber(calls)
+
+    pipeline = Pipeline(
+        media=media,
+        authoring=authoring,
+        renderer=renderer,
+        model_client=object(),  # type: ignore[arg-type]
+        reviewer=object(),  # type: ignore[arg-type]
+        authoring_only=True,
+        ideal_cuts_agent=None,
+        describer=describer,
+    )
+
+    pipeline.run(host="host.mp4", broll=["clip.mp4"], brief="use the b-roll")
+
+    assert "describe:1" in calls
+    assert "IdealCuts Plan" not in (authoring.brief or "")
+    assert calls == [
+        "ingest:host.mp4",
+        "ingest:clip.mp4",
+        "transcribe:asset-host.mp4",
+        "describe:1",
+        "author",
+        "render",
+    ]
 
 
 @pytest.mark.parametrize(

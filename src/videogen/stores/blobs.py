@@ -29,6 +29,14 @@ class BlobStore(Protocol):
         """
         ...
 
+    def write_text(self, name: str, text: str) -> str:
+        """Persist a text artifact (e.g. the compiled IR) under ``name``; return its location.
+
+        A sibling of ``write_render_output`` for the small JSON sidecars a render emits, so they
+        land in the same store behind the same seam (a filesystem path today, a URI later).
+        """
+        ...
+
 
 class FilesystemBlobStore:
     """Persists render outputs under a root directory; the location is the absolute file path."""
@@ -40,4 +48,10 @@ class FilesystemBlobStore:
         dest = self.root / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, dest)
+        return str(dest.resolve())
+
+    def write_text(self, name: str, text: str) -> str:
+        dest = self.root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text, encoding="utf-8")
         return str(dest.resolve())

@@ -21,7 +21,7 @@
       "kind": "media",
       "src": "host.mp4",
       "content": "video",
-      "in": null,
+      "in": 0.0,
       "rect": null,
       "crop": null
     },

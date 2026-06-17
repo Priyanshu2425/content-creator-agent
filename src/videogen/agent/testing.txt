@@ -1,0 +1,1 @@
+uv run videogen make --host /Users/d3adpool/Downloads/reel_5_final_draft_cropped.mp4 --brief "Instagram reel with fast cuts"

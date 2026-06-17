@@ -14,7 +14,7 @@ import itertools
 from collections.abc import Sequence
 from pathlib import Path
 
-from videogen.agent.loop import AuthoringLoop
+from videogen.agent.loop import DirectorLoop
 from videogen.agent.model import AssistantTurn, HistoryItem, ToolCall, ToolResultsMessage, ToolSpec
 from videogen.agent.perception import AssetFact, MediaManifest
 from videogen.kernel.builder import Builder
@@ -122,7 +122,10 @@ def make_loop(
     builder: Builder | None = None,
     max_ops: int = 40,
     advisor: object | None = None,
-) -> tuple[AuthoringLoop, Builder, CompositionStore, str]:
+    dispatchers: dict | None = None,
+    brand_kit: object | None = None,
+    max_dispatch_per_worker: int = 2,
+) -> tuple[DirectorLoop, Builder, CompositionStore, str]:
     builder = builder or Builder.new(
         voiceover="host",
         duration=2.0,
@@ -130,7 +133,7 @@ def make_loop(
     )
     store = CompositionStore()
     doc_id = store.open(builder.composition)
-    loop = AuthoringLoop(
+    loop = DirectorLoop(
         client,  # type: ignore[arg-type]
         builder,
         make_manifest(),
@@ -140,6 +143,9 @@ def make_loop(
         brief="make a short",
         max_ops=max_ops,
         advisor=advisor,  # type: ignore[arg-type]
+        dispatchers=dispatchers,  # type: ignore[arg-type]
+        brand_kit=brand_kit,
+        max_dispatch_per_worker=max_dispatch_per_worker,
     )
     return loop, builder, store, doc_id
 
@@ -361,3 +367,192 @@ def test_blind_client_with_advisor_but_no_backend_falls_back_to_plain_tools() ->
 
     # no backend means no still to render, so the advice tool can't function -> not offered
     assert "consult_placement" not in client.tools_seen[0]
+
+
+# --- worker dispatch (restructure/03, ADR 0008) ----------------------------------------------
+
+from videogen.agent.dispatch import NewAsset, WorkerProposal  # noqa: E402
+
+
+class FakeBrollDispatcher:
+    """Stands in for the real b-roll worker: records each call and returns a fixed proposal."""
+
+    def __init__(self, assets: tuple[NewAsset, ...] = ()) -> None:
+        self.calls: list[dict] = []
+        self._assets = assets
+
+    def __call__(self, guidance: dict) -> WorkerProposal:
+        self.calls.append(guidance)
+        return WorkerProposal(
+            proposal_text="shot list: broll_1 depicts a city skyline",
+            new_assets=self._assets,
+        )
+
+
+class FakeBrandKit:
+    """Minimal brand kit exposing the tokens() seam the loop injects into a dispatch."""
+
+    def tokens(self) -> dict:
+        return {"colors": {"bg": "#000"}, "caption_style": "pill"}
+
+
+def test_dispatch_broll_tool_is_advertised_only_when_a_worker_is_wired() -> None:
+    without = ScriptedClient([turn()])
+    loop, *_ = make_loop(without)
+    loop.run()
+    assert "dispatch_broll" not in without.tools_seen[0]
+
+    with_disp = ScriptedClient([turn()])
+    loop, *_ = make_loop(with_disp, dispatchers={"dispatch_broll": FakeBrollDispatcher()})
+    loop.run()
+    assert "dispatch_broll" in with_disp.tools_seen[0]
+
+
+def test_dispatch_broll_runs_the_worker_registers_assets_and_threads_the_proposal() -> None:
+    new = NewAsset("broll_1", Asset(type=AssetType.image, src="broll_1.png"), "city skyline")
+    dispatcher = FakeBrollDispatcher(assets=(new,))
+    client = ScriptedClient([turn(call("dispatch_broll", guidance="cover the open")), turn()])
+    loop, builder, _store, _doc = make_loop(
+        client, dispatchers={"dispatch_broll": dispatcher}, brand_kit=FakeBrandKit()
+    )
+    loop.run()
+
+    # the worker ran, the brand kit tokens were injected
+    assert len(dispatcher.calls) == 1
+    assert dispatcher.calls[0]["brand_kit"] == {"colors": {"bg": "#000"}, "caption_style": "pill"}
+    # the generated asset is registered into the library, ready for fill_region/add_overlay
+    assert "broll_1" in builder.composition.assets
+    # the proposal text is threaded back to the model on the following turn
+    tool_msg = next(m for m in client.seen[1] if isinstance(m, ToolResultsMessage))
+    assert "city skyline" in (tool_msg.results[0].text or "")
+    assert "broll_1" in (tool_msg.results[0].text or "")
+
+
+def test_director_can_place_a_dispatched_broll_asset_end_to_end() -> None:
+    new = NewAsset("broll_1", Asset(type=AssetType.image, src="broll_1.png"), "city skyline")
+    dispatcher = FakeBrollDispatcher(assets=(new,))
+    client = ScriptedClient(
+        [
+            turn(call("dispatch_broll")),
+            turn(call("add_scene", layout="full", start=0.0, end=2.0, id="s1")),
+            turn(call("fill_region", scene_id="s1", region="full", asset_id="broll_1")),
+            turn(call("finish")),
+        ]
+    )
+    loop, builder, _store, _doc = make_loop(client, dispatchers={"dispatch_broll": dispatcher})
+    result = loop.run()
+
+    assert result.terminated_clean
+    scene = builder.get_scene("s1")
+    assert scene is not None and scene.regions[RegionName.full].asset == "broll_1"
+
+
+def test_dispatch_budget_is_enforced_per_worker() -> None:
+    dispatcher = FakeBrollDispatcher()
+    client = ScriptedClient(
+        [turn(call("dispatch_broll")), turn(call("dispatch_broll")), turn()]
+    )
+    loop, *_ = make_loop(
+        client, dispatchers={"dispatch_broll": dispatcher}, max_dispatch_per_worker=1
+    )
+    loop.run()
+
+    # the dispatcher ran once; the second dispatch was refused by the budget
+    assert len(dispatcher.calls) == 1
+    tool_msg = _last_tool_results(client.seen[2])
+    assert "budget exhausted" in (tool_msg.results[0].text or "")
+
+
+def test_dispatch_does_not_consume_the_builder_op_budget() -> None:
+    dispatcher = FakeBrollDispatcher()
+    # Two dispatches then finish: with max_ops=1, dispatches must not count or finish never runs.
+    client = ScriptedClient(
+        [turn(call("dispatch_broll")), turn(call("dispatch_broll")), turn(call("finish"))]
+    )
+    loop, *_ = make_loop(
+        client, dispatchers={"dispatch_broll": dispatcher}, max_ops=1, max_dispatch_per_worker=5
+    )
+    result = loop.run()
+
+    assert result.terminated_clean
+    assert result.ops_used == 1  # only the finish op counted
+
+
+# --- text-hook dispatch (texthook/02, ADR 0008) -----------------------------------------------
+
+
+class FakeTextHookDispatcher:
+    """Stands in for the text-hook worker: returns a candidates proposal, no assets."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def __call__(self, guidance: dict) -> WorkerProposal:
+        self.calls.append(guidance)
+        return WorkerProposal(
+            proposal_text='Text-hook candidates:\n  1. "Stop scrolling" [curiosity_gap] <- recommended',
+            new_assets=(),
+        )
+
+
+def test_dispatch_text_hook_is_advertised_only_when_wired() -> None:
+    with_disp = ScriptedClient([turn()])
+    loop, *_ = make_loop(with_disp, dispatchers={"dispatch_text_hook": FakeTextHookDispatcher()})
+    loop.run()
+    assert "dispatch_text_hook" in with_disp.tools_seen[0]
+
+
+def test_director_dispatches_text_hook_then_places_it_with_add_title() -> None:
+    dispatcher = FakeTextHookDispatcher()
+    client = ScriptedClient(
+        [
+            turn(call("add_scene", layout="full", start=0.0, end=2.0, id="s0")),
+            turn(call("fill_region", scene_id="s0", region="full", asset_id="host")),
+            turn(call("dispatch_text_hook", guidance="freelancers")),
+            turn(call("add_title", text="Stop scrolling", start=0.0, end=2.0, placement="upper-third")),
+            turn(call("finish")),
+        ]
+    )
+    loop, builder, _store, _doc = make_loop(
+        client, dispatchers={"dispatch_text_hook": dispatcher}
+    )
+    result = loop.run()
+
+    assert result.terminated_clean
+    assert len(dispatcher.calls) == 1
+    titles = [o for o in builder.composition.overlays if o.type == "title"]
+    assert len(titles) == 1 and titles[0].text == "Stop scrolling"
+
+
+# --- sfx dispatch (sfx/02, ADR 0009) ----------------------------------------------------------
+
+
+class FakeSfxDispatcher:
+    """Stands in for the SFX worker: returns cut-bound scene_audio placements."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def __call__(self, guidance: dict) -> WorkerProposal:
+        self.calls.append(guidance)
+        return WorkerProposal(proposal_text="sfx placed", scene_audio=(("s0", "whoosh"),))
+
+
+def test_dispatch_sfx_applies_scene_audio_and_passes_the_event_timeline() -> None:
+    dispatcher = FakeSfxDispatcher()
+    client = ScriptedClient(
+        [
+            turn(call("add_scene", layout="full", start=0.0, end=2.0, id="s0")),
+            turn(call("fill_region", scene_id="s0", region="full", asset_id="host")),
+            turn(call("dispatch_sfx")),
+            turn(call("finish")),
+        ]
+    )
+    loop, builder, _store, _doc = make_loop(client, dispatchers={"dispatch_sfx": dispatcher})
+    result = loop.run()
+
+    assert result.terminated_clean
+    scene = builder.get_scene("s0")
+    assert scene is not None and scene.audio is not None and scene.audio.sound.value == "whoosh"
+    # the Director (loop) built and handed the event timeline to the worker
+    assert "event_timeline" in dispatcher.calls[0]

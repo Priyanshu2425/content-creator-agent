@@ -90,6 +90,34 @@ Both forms are first-class, author picks per shot:
 - **Full-frame b-roll** = a `full` **scene** with the screenshot as its region item (hard cut in/out). This is the reference-video style.
 - **Floating b-roll** = an `insert` **overlay** (a card over a continuing scene, positioned by `anchor`/`scale`, painted by `z`).
 
+## Agents (resolving)
+
+**Director**:
+The orchestrator agent — the former *authoring agent*, renamed. Owns everything that must be consistent across the whole video and integrates worker outputs into the finished Composition. It still authors the Composition by calling **validated Builder ops one per turn** (the kernel stays the source of truth; the Director never emits a Composition JSON wholesale — ADR 0001 holds). New power: it dispatches worker agents and turns their accepted **proposals** into op calls.
+_Avoid_: authoring agent (old name), orchestrator-as-author
+
+**Worker**:
+A specialist sub-agent the Director dispatches. A worker returns a **proposal** (candidates / a list / intents) — never a Composition and never a rendered final. The Director decides what to accept and is the only agent that authors the document. Three workers: `TextHookAgent`, `BrollGeneratorAgent`, `SFXAgent`.
+_Avoid_: sub-agent (informal), tool (a worker is dispatched, not a Builder op)
+
+**Proposal**:
+What a worker returns to the Director — e.g. ranked text-hook candidates, a b-roll shot list, an SFX placement list. Advisory: the Director may accept, drop, or amend before it becomes ops. Distinct from the doc the Director builds.
+
+**Brand kit**:
+The locked, per-video token spec the Director owns and injects to every worker — the single source of truth for the video's design language (colors, font, caption style, sfx palette + density budget, frame meta, and safe-zone tokens in v1; motion/graphics/logo/sound tokens grow in later phases). Safe-zone tokens are reasoned with *behaviorally* by the Director in v1 (no machine enforcement yet). Workers style every asset to these tokens; an asset that ignores them is non-conformant. Supersedes the hardcoded `StyleBrief` seed.
+_Avoid_: theme, style guide, design system
+
+**Brand profile**:
+The optional user-supplied *input* the brand kit is built from. If present the Director loads it; if absent the Director derives a sensible kit from the brief. Once built, the kit is locked for the whole video.
+_Avoid_: brand kit (the profile is the input; the kit is the locked result)
+
+**Text hook**:
+The on-screen static headline overlaid on the first ~1–3s, for the muted scroller and the paused thumbnail. Produced by `TextHookAgent`. Distinct from the **spoken hook** (the creator's opening line, already recorded, never changed) and from a **caption** (transcript-synced, animated). Placed by the Director as a new additive `title` overlay (not a caption).
+_Avoid_: title card, caption, subtitle
+
+**Spoken hook**:
+The first line(s) the creator actually says, already in the recording. The text hook must say something *different but consistent* — a second angle, never a transcript of the spoken hook.
+
 ## Flagged ambiguities
 
 - **"Action"** is the user's umbrella word. Canonically it splits into an **overlay** (anything on top of scenes), a **scene** boundary, and a **transition**. There is no single "action" entity.

@@ -143,6 +143,10 @@ class OpenAICompatModelClient:
         self._extra_body = extra_body
         self._client = client if client is not None else self._build_client(api_key)
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def next_turn(
         self,
         *,

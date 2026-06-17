@@ -34,6 +34,7 @@ from videogen.kernel.composition import (
     Audio,
     Caption,
     CaptionStyle,
+    CaptionWord,
     Composition,
     CropRect,
     LayoutName,
@@ -41,8 +42,12 @@ from videogen.kernel.composition import (
     Ref,
     RegionName,
     Scene,
+    SceneAudio,
+    SoundKind,
+    TitleOverlay,
     Transition,
     TransitionKind,
+    _AudioBudget,
 )
 from videogen.kernel.validator import (
     ErrorCode,
@@ -164,6 +169,21 @@ class Builder:
         )
         return self._commit(candidate, sid)
 
+    def add_asset(self, asset_id: AssetId, asset: Asset) -> OpResult:
+        """Register a new media Asset into the library mid-run.
+
+        Assets are objective facts (ADR 0003), normally seeded at ``new`` from the manifest. This op
+        admits facts produced *during* a run -- e.g. a clip a dispatched worker just generated
+        (ADR 0008) -- so the Director can then reference it in ``fill_region``/``add_overlay``.
+        Re-registering an existing id rejects."""
+        if asset_id in self._composition.assets:
+            return _reject(
+                ErrorCode.DUPLICATE_ASSET_ID, f"asset id '{asset_id}' already exists", asset_id
+            )
+        new_assets = {**self._composition.assets, asset_id: asset}
+        candidate = self._composition.model_copy(update={"assets": new_assets})
+        return self._commit(candidate, asset_id)
+
     def add_transition(
         self,
         after_scene: str,
@@ -230,6 +250,39 @@ class Builder:
         candidate = self._composition.model_copy(update={"overlays": overlays})
         return self._commit(candidate, f"overlay[{len(overlays) - 1}]")
 
+    def add_title(
+        self,
+        text: str,
+        start: float,
+        end: float,
+        *,
+        placement: str = "upper-third",
+        target: RegionName = RegionName.full,
+        z: int = 0,
+    ) -> OpResult:
+        """Place a static text-hook headline as an additive ``title`` overlay (texthook/01).
+
+        A convenience over ``add_overlay``: it builds the typed ``TitleOverlay`` (envelope +
+        params validated on commit) so the Director places the hook with one op, distinct from
+        the transcript-synced captions track."""
+        overlay = TitleOverlay(
+            text=text, start=start, end=end, placement=placement, target=target, z=z  # type: ignore[arg-type]
+        )
+        return self.add_overlay(overlay)
+
+    def set_scene_audio(self, scene_id: str, sound: str, *, reason: str = "") -> OpResult:
+        """Attach a sound effect to a Scene's cut (sfx/02, ADR 0009).
+
+        Cut-bound SFX: the SFXAgent is the single authority, so the sound rides ``scene.audio`` and
+        the whoosh transition stays silent. An unknown ``scene_id`` rejects."""
+        index = self._scene_index(scene_id)
+        if index is None:
+            return _reject(ErrorCode.UNKNOWN_SCENE, f"no scene with id '{scene_id}'", scene_id)
+        scene = self._composition.scenes[index]
+        audio = SceneAudio(sound=SoundKind(sound), reason=reason, budget_used=_AudioBudget())
+        new_scene = scene.model_copy(update={"audio": audio})
+        return self._commit(self._with_scene(index, new_scene), scene_id)
+
     def add_caption(
         self, text: str, start: float, end: float, style: CaptionStyle = CaptionStyle.pill
     ) -> OpResult:
@@ -242,16 +295,24 @@ class Builder:
     def add_captions_from_transcript(
         self, transcript: TranscriptLike, *, style: CaptionStyle = CaptionStyle.pill
     ) -> OpResult:
-        """Batch-create Captions from word-timed transcript output, one Caption per word.
+        """Batch-create Captions from word-timed transcript output, grouped into karaoke **lines**.
 
-        Word timings are mapped onto the canonical absolute-seconds Timeline (MediaService already
-        reports seconds, so this is a direct map; the seam is where a non-seconds representation
-        would convert). The whole batch is validated as a single operation: if any caption is out
-        of bounds the batch is rejected and the track is left unchanged.
+        Words are grouped into short readable lines (a new line at ``_MAX_WORDS_PER_LINE`` words or a
+        natural pause over ``_LINE_BREAK_GAP_S``); each line becomes one Caption carrying its words'
+        timings, so the renderer shows a single line and highlights the word being spoken right now
+        rather than flashing one word at a time. Word timings map directly onto the absolute-seconds
+        Timeline (MediaService already reports seconds). The whole batch is validated as a single
+        operation: if any caption is out of bounds the batch is rejected and the track is unchanged.
         """
         new_captions = [
-            Caption(text=word.text, start=word.start, end=word.end, style=style)
-            for word in transcript.words
+            Caption(
+                text=" ".join(w.text for w in line),
+                start=line[0].start,
+                end=line[-1].end,
+                style=style,
+                words=tuple(CaptionWord(text=w.text, start=w.start, end=w.end) for w in line),
+            )
+            for line in _group_words_into_lines(transcript.words)
         ]
         candidate = self._composition.model_copy(
             update={"captions": [*self._composition.captions, *new_captions]}
@@ -366,3 +427,24 @@ def _reject(code: ErrorCode, message: str, entity_ref: str | None) -> OpResult:
         warnings=(),
         entity_ref=entity_ref,
     )
+
+
+# Caption line grouping: a new line starts at this many words, or after a natural pause this long.
+_MAX_WORDS_PER_LINE = 4
+_LINE_BREAK_GAP_S = 0.7
+
+
+def _group_words_into_lines(words: Sequence[TranscriptWord]) -> list[list[TranscriptWord]]:
+    """Group word-timed transcript output into short, readable caption lines."""
+    lines: list[list[TranscriptWord]] = []
+    current: list[TranscriptWord] = []
+    for word in words:
+        if current:
+            gap = word.start - current[-1].end
+            if len(current) >= _MAX_WORDS_PER_LINE or gap > _LINE_BREAK_GAP_S:
+                lines.append(current)
+                current = []
+        current.append(word)
+    if current:
+        lines.append(current)
+    return lines

@@ -11,6 +11,10 @@ in-process calls behind their interfaces:
          finalization gate renders + video-reviews + corrects it (bounded)
       -> RenderService (via the render adapter): submit_render -> poll -> the finished mp4 path
 
+    make --authoring-only --host host.mp4 --broll ./pack --brief "..."
+      -> ingest + transcribe + describe-assets (forced) + author + audio-decider + render
+      (skips IdealCuts and GenerateBroll; supplied b-roll required)
+
 The Composition JSON is the message contract between the stages. The CLI depends on the service
 *interfaces* (the ``*Port`` Protocols below and the existing agent/finalization seams), never their
 internals, so the later move to HTTP + a real queue is a transport change rather than a CLI rewrite
@@ -21,6 +25,7 @@ with a non-zero exit (story 15).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -32,12 +37,14 @@ from typing import Any, Protocol
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import AssetFact, Manifest, MediaManifest
 from videogen.agent.review import ReviewAgent
+from videogen.agent.timeline_skeleton import build_skeleton
 from videogen.agent.vision_advice import VisionAdvisor
 from videogen.app.settings import Settings, load_settings
-from videogen.kernel.composition import AssetType
+from videogen.kernel.composition import Asset, AssetType
 from videogen.services.authoring import AuthoredComposition
 from videogen.services.finalize import VideoRenderer
 from videogen.services.media import ProbeResult, Transcript
+from videogen import log, tracing
 
 # Maps a settings ``authoring_client`` name to its adapter in the ``agent.clients`` package. Adding
 # a client is a new entry here plus the module under ``clients/`` -- the rest of the CLI unchanged.
@@ -49,9 +56,9 @@ _AUTHORING_CLIENTS = {
     "perplexity": "PerplexityModelClient",
 }
 
-# File extensions that mark a b-roll asset as a still image rather than a movie clip; everything
-# else is treated as video. The host is always video (its audio is the voiceover, ADR 0005).
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"})
+_VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".webm", ".m4v", ".mkv"})
+_MEDIA_SUFFIXES = _IMAGE_SUFFIXES | _VIDEO_SUFFIXES
 
 
 class MediaPort(Protocol):
@@ -78,6 +85,9 @@ class AuthoringPort(Protocol):
         renderer: VideoRenderer | None = ...,
         advisor: VisionAdvisor | None = ...,
         max_review_rounds: int = ...,
+        dispatchers: dict[str, Any] | None = ...,
+        brand_kit: Any = ...,
+        timeline_skeleton: str = ...,
     ) -> AuthoredComposition: ...
 
 
@@ -93,10 +103,10 @@ class PipelineError(RuntimeError):
 @contextmanager
 def _stage(name: str) -> Iterator[None]:
     """Tag any failure in this block with the stage it happened in (story 15)."""
-    from videogen import log
     log.get().stage_start(name)
     try:
-        yield
+        with tracing.stage_span(name):
+            yield
         log.get().stage_done(name)
     except PipelineError:
         raise  # already tagged -- don't double-wrap
@@ -107,11 +117,12 @@ def _stage(name: str) -> Iterator[None]:
 
 @dataclass
 class Pipeline:
-    """The in-process wiring of the three services behind their interfaces (ADR 0003).
+    """The in-process orchestrator.
 
-    Holds the collaborators ``run`` needs and nothing else; the authoring model, the video reviewer,
-    and the render adapter are all injected, so swapping a provider or a transport never touches the
-    orchestration. ``run`` is the whole command body; ``main`` only parses arguments and calls it.
+    Full pipeline: ingest → transcribe → ideal-cuts → generate-broll → describe-assets? →
+    author → audio-decider? → render.
+
+    ``--authoring-only``: ingest → transcribe → describe-assets (forced) → author → …
     """
 
     media: MediaPort
@@ -121,54 +132,31 @@ class Pipeline:
     reviewer: ReviewAgent
     advisor: VisionAdvisor | None = None
     max_review_rounds: int = 2
-    broll_fetcher: Any = field(default=None)  # PerplexityBrollAgent | None
-    broll_fetch_limit: int = 6
-    fetched_broll_dir: Path | None = None
-    describer: Any = field(default=None)  # GeminiDescribeAgent | None
+    platform: str = "Instagram"
+    authoring_only: bool = False
+    ideal_cuts_agent: Any = field(default=None)      # IdealCutsAgent | None
+    generate_broll_agent: Any = field(default=None)  # GenerateBrollAgent | None
+    generated_broll_dir: Path | None = None
+    audio_decider_agent: Any = field(default=None)   # AudioDeciderAgent | None
+    describer: Any = field(default=None)             # GeminiDescribeAgent | None
+    brand_kit: Any = field(default=None)             # BrandKit | None (the Director's locked design language)
 
     def run(self, *, host: str, broll: Sequence[str], brief: str) -> str:
-        """Walk the pipeline and return the finished mp4's location.
+        """Walk the pipeline and return the finished mp4's location."""
+        with tracing.pipeline_trace(
+            brief=brief,
+            platform=self.platform,
+            host=host,
+            creation_style=getattr(self.authoring, "_system", "classic") or "classic",
+        ):
+            return self._run(host=host, broll=broll, brief=brief)
 
-        Ingest and probe come first so a bad path or unreadable file fails fast, before the
-        expensive authoring and render stages (story 8).
-        """
+    def _run(self, *, host: str, broll: Sequence[str], brief: str) -> str:
         with _stage("ingest"):
             host_id, host_facts, asset_facts = self._ingest(host, broll)
         with _stage("transcribe"):
             transcript = self.media.transcribe(host_id)
-
-        if self.broll_fetcher is not None and self.fetched_broll_dir is not None:
-            with _stage("fetch-broll"):
-                fetched = self.broll_fetcher.fetch(
-                    brief,
-                    transcript.text,
-                    limit=self.broll_fetch_limit,
-                    dest=self.fetched_broll_dir,
-                )
-                for path in fetched:
-                    asset_id = self.media.ingest(str(path))
-                    asset_facts.append(
-                        _asset_fact(
-                            self.media,
-                            asset_id,
-                            _asset_type(str(path)),
-                            self.media.probe(asset_id),
-                        )
-                    )
-
-        if self.describer is not None:
-            with _stage("describe-assets"):
-                to_describe = [f for f in asset_facts if f.id != host_id]
-                descriptions = self.describer.describe_all(
-                    to_describe,
-                    brief=brief,
-                    transcript=transcript.text,
-                )
-                asset_facts = [
-                    dataclasses.replace(f, description=d.description, usage_advice=d.usage_advice)
-                    if (d := descriptions.get(f.id)) is not None else f
-                    for f in asset_facts
-                ]
+            log.get().transcribe_done(len(transcript.words), host_facts.duration)
 
         manifest = MediaManifest(
             assets=tuple(asset_facts),
@@ -177,6 +165,67 @@ class Pipeline:
             fps=host_facts.fps,
             transcript=transcript,
         )
+
+        # The former IdealCuts stage is folded into the Director (ADR 0008): instead of a separate
+        # LLM cut-planner, build the deterministic timeline skeleton (hook window + caption cadence)
+        # and hand it to the Director, which authors the cuts itself.
+        with _stage("timeline-skeleton"):
+            skeleton = build_skeleton(transcript=transcript, duration=host_facts.duration)
+
+        # B-roll generation is now an in-loop worker the Director dispatches on demand (ADR 0008),
+        # not a fixed upstream stage. Build the dispatcher here (it binds media ingest + the worker
+        # agent) and hand it to the author step; the Director decides whether and when to call it.
+        dispatchers: dict[str, Any] = {}
+        if (
+            not self.authoring_only
+            and self.generate_broll_agent is not None
+            and self.generated_broll_dir is not None
+        ):
+            dispatchers["dispatch_broll"] = _make_broll_dispatcher(
+                media=self.media,
+                agent=self.generate_broll_agent,
+                manifest=manifest,
+                brief=brief,
+                platform=self.platform,
+                ideal_cuts_plan="",
+                dest=self.generated_broll_dir,
+            )
+
+        # The text-hook worker needs only the transcript + a model, so it is always available.
+        dispatchers["dispatch_text_hook"] = _make_text_hook_dispatcher(
+            model_client=self.model_client, transcript_text=transcript.text
+        )
+
+        if self.authoring_only or self.describer is not None:
+            if self.describer is None:
+                raise RuntimeError("describe-assets required but no describer is configured")
+            with _stage("describe-assets"):
+                asset_facts = _describe_assets(
+                    self.describer,
+                    host_id=host_id,
+                    asset_facts=asset_facts,
+                    brief=brief,
+                    transcript=transcript.text,
+                )
+                manifest = MediaManifest(
+                    assets=tuple(asset_facts),
+                    voiceover=host_id,
+                    duration=host_facts.duration,
+                    fps=host_facts.fps,
+                    transcript=transcript,
+                )
+
+        run_brand_kit = self.brand_kit
+        if run_brand_kit is not None:
+            from videogen.agent.brand_kit import FrameMeta
+
+            run_brand_kit = run_brand_kit.with_frame(
+                FrameMeta.of(
+                    width=int(host_facts.width or 0),
+                    height=int(host_facts.height or 0),
+                    fps=int(host_facts.fps),
+                )
+            )
 
         with _stage("author"):
             authored = self.authoring.author(
@@ -187,14 +236,24 @@ class Pipeline:
                 renderer=self.renderer,
                 advisor=self.advisor,
                 max_review_rounds=self.max_review_rounds,
+                dispatchers=dispatchers or None,
+                brand_kit=run_brand_kit,
+                timeline_skeleton=skeleton.summary(),
             )
+
+        composition = authored.composition
+        if self.audio_decider_agent is not None:
+            with _stage("audio-decider"):
+                composition = self.audio_decider_agent.annotate(composition)
+
         with _stage("render"):
             artifact = self.renderer.render_video(
-                authored.composition,
+                composition,
                 fps=int(manifest.fps),
                 duration=manifest.duration,
                 name="final.mp4",
             )
+        tracing.update_pipeline_output(str(artifact))
         return str(artifact)
 
     def close(self) -> None:
@@ -208,20 +267,47 @@ class Pipeline:
     ) -> tuple[str, ProbeResult, list[AssetFact]]:
         host_id = self.media.ingest(host)
         host_facts = self.media.probe(host_id)
+        log.get().ingest_asset(
+            host_id, "video", host_facts.duration, host_facts.width, host_facts.height
+        )
         facts = [_asset_fact(self.media, host_id, AssetType.video, host_facts)]
         for item in broll:
             asset_id = self.media.ingest(item)
-            facts.append(
-                _asset_fact(self.media, asset_id, _asset_type(item), self.media.probe(asset_id))
+            kind = _asset_type(item)
+            probe = self.media.probe(asset_id)
+            log.get().ingest_asset(
+                asset_id,
+                kind.value,
+                None if kind is AssetType.image else probe.duration,
+                probe.width,
+                probe.height,
             )
+            facts.append(_asset_fact(self.media, asset_id, kind, probe))
         return host_id, host_facts, facts
 
 
+def _is_media_file(path: Path) -> bool:
+    return path.suffix.lower() in _MEDIA_SUFFIXES
+
+
 def _asset_type(path: str) -> AssetType:
-    return AssetType.image if Path(path).suffix.lower() in _IMAGE_SUFFIXES else AssetType.video
+    suffix = Path(path).suffix.lower()
+    if suffix in _IMAGE_SUFFIXES:
+        return AssetType.image
+    if suffix in _VIDEO_SUFFIXES:
+        return AssetType.video
+    raise ValueError(f"unsupported media extension for b-roll: {path!r}")
 
 
-def _asset_fact(media: MediaPort, asset_id: str, kind: AssetType, probe: ProbeResult) -> AssetFact:
+def _asset_fact(
+    media: MediaPort,
+    asset_id: str,
+    kind: AssetType,
+    probe: ProbeResult,
+    *,
+    description: str | None = None,
+    usage_advice: str | None = None,
+) -> AssetFact:
     """Turn an asset's probe facts into the Manifest's view of it (ADR 0003: facts, no creative
     interpretation). A still image carries no duration, so it is reported as absent."""
     return AssetFact(
@@ -231,12 +317,174 @@ def _asset_fact(media: MediaPort, asset_id: str, kind: AssetType, probe: ProbeRe
         duration=None if kind is AssetType.image else probe.duration,
         width=probe.width or None,
         height=probe.height or None,
+        description=description,
+        usage_advice=usage_advice,
     )
 
 
+def _make_broll_dispatcher(
+    *,
+    media: MediaPort,
+    agent: Any,
+    manifest: MediaManifest,
+    brief: str,
+    platform: str,
+    ideal_cuts_plan: str,
+    dest: Path,
+) -> Any:
+    """Build the b-roll worker dispatcher (ADR 0008).
+
+    When the Director calls ``dispatch_broll``, this runs the b-roll worker (which generates stills +
+    stat-viz clips to ``dest``), ingests each produced file as a fact, and returns a proposal naming
+    the new assets. The loop registers them into the Builder so the Director can place them — the
+    worker never composites.
+    """
+    from videogen.agent.dispatch import NewAsset, WorkerProposal
+
+    def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
+        generated = agent.run(manifest, brief, platform, ideal_cuts_plan, dest=dest)
+        new_assets: list[NewAsset] = []
+        lines: list[str] = []
+        for slot in generated.slots:
+            asset_id = media.ingest(str(slot.path))
+            kind = _asset_type(str(slot.path))
+            asset = Asset(type=AssetType(kind.value), src=str(media.resolve(asset_id)))
+            new_assets.append(NewAsset(asset_id=asset_id, asset=asset, description=slot.prompt))
+            lines.append(f"- {asset_id} ({kind.value}): {slot.prompt}")
+        text = (
+            "B-roll worker produced these assets (styled to the brand kit):\n" + "\n".join(lines)
+            if lines
+            else "B-roll worker produced no usable assets for this video."
+        )
+        return WorkerProposal(proposal_text=text, new_assets=tuple(new_assets))
+
+    return dispatch
+
+
+def _make_text_hook_dispatcher(*, model_client: ModelClient, transcript_text: str) -> Any:
+    """Build the text-hook worker dispatcher (ADR 0008).
+
+    When the Director calls ``dispatch_text_hook``, this runs the TextHookAgent over the transcript
+    and returns its ranked candidates as a proposal. It produces no assets -- the Director picks one
+    and places it with ``add_title``.
+    """
+    from videogen.agent.dispatch import WorkerProposal
+    from videogen.agent.text_hook import TextHookAgent
+
+    agent = TextHookAgent(model_client)
+
+    def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
+        proposal = agent.generate(
+            transcript=transcript_text,
+            audience=str(guidance.get("guidance", "")),
+            brand_kit=guidance.get("brand_kit"),
+        )
+        return WorkerProposal(proposal_text=proposal.to_text(), new_assets=())
+
+    return dispatch
+
+
+def _describe_assets(
+    describer: Any,
+    *,
+    host_id: str,
+    asset_facts: list[AssetFact],
+    brief: str,
+    transcript: str,
+) -> list[AssetFact]:
+    """Vision-describe every b-roll asset (not the host) for the authoring perception packet."""
+    to_describe = [f for f in asset_facts if f.id != host_id]
+    if not to_describe:
+        log.get().describe_done(0)
+        return asset_facts
+    descriptions = describer.describe_all(
+        to_describe,
+        brief=brief,
+        transcript=transcript,
+    )
+    return [
+        dataclasses.replace(f, description=d.description, usage_advice=d.usage_advice)
+        if (d := descriptions.get(f.id)) is not None
+        else f
+        for f in asset_facts
+    ]
+
+
 def _split_broll(value: str) -> list[str]:
-    """Split the comma-separated ``--broll`` value into individual assets, dropping blanks."""
+    """Split the comma-separated ``--broll`` value into paths, dropping blanks."""
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _expand_broll_entry(entry: str) -> list[str]:
+    """Expand one ``--broll`` token (file or one-level folder) into ingestible media paths."""
+    path = Path(entry).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"b-roll path does not exist: {entry}")
+    if path.is_file():
+        if not _is_media_file(path):
+            log.get().broll_path_skipped(str(path), "unsupported extension")
+            return []
+        return [str(path.resolve())]
+    if path.is_dir():
+        resolved: list[str] = []
+        for child in sorted(path.iterdir(), key=lambda p: p.name.lower()):
+            if not child.is_file():
+                continue
+            if _is_media_file(child):
+                resolved.append(str(child.resolve()))
+            else:
+                log.get().broll_path_skipped(str(child), "unsupported extension")
+        return resolved
+    raise ValueError(f"b-roll path is neither a file nor a directory: {entry}")
+
+
+def expand_broll_paths(entries: Sequence[str]) -> list[str]:
+    """Expand comma-list order: each entry is a file or a folder (immediate children only)."""
+    expanded: list[str] = []
+    for entry in entries:
+        expanded.extend(_expand_broll_entry(entry))
+    log.get().broll_expand_done(len(expanded))
+    return expanded
+
+
+def _has_gemini_api_key() -> bool:
+    # True for either auth path: ADC/Vertex (GOOGLE_GENAI_USE_VERTEXAI) or an API key.
+    from videogen.genai_client import have_gemini_credentials
+
+    return have_gemini_credentials()
+
+
+def _prepare_broll_for_make(*, broll_arg: str, authoring_only: bool) -> list[str]:
+    """Parse and expand ``--broll``; enforce authoring-only contracts."""
+    entries = _split_broll(broll_arg)
+    if authoring_only:
+        if not entries:
+            _cli_error(
+                "--authoring-only requires --broll "
+                "(comma-separated media files and/or a folder of b-roll)."
+            )
+        if not _has_gemini_api_key():
+            _cli_error(
+                "--authoring-only requires Gemini for asset descriptions; "
+                "authenticate via ADC (GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT) or set GOOGLE_API_KEY/GEMINI_API_KEY."
+            )
+    if not entries:
+        return []
+    try:
+        paths = expand_broll_paths(entries)
+    except (FileNotFoundError, ValueError) as exc:
+        _cli_error(str(exc))
+    if authoring_only and not paths:
+        _cli_error(
+            "--authoring-only found no ingestible b-roll under --broll "
+            "(expected image/video files or a folder whose immediate children are media)."
+        )
+    return paths
+
+
+def _cli_error(message: str) -> None:
+    print(f"videogen: {message}", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -249,12 +497,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "--host", required=True, help="Host-cam recording; its audio is the voiceover master clock."
     )
     make.add_argument(
-        "--broll", default="", help="Optional comma-separated b-roll assets (clips and/or stills)."
+        "--broll",
+        default="",
+        help=(
+            "Comma-separated b-roll files and/or folders. A folder ingests media files "
+            "among its immediate children only (not subfolders)."
+        ),
     )
     make.add_argument(
         "--brief", required=True, help="Free-text brief: topic, length, style, must-use moments."
     )
+    make.add_argument(
+        "--brand-profile",
+        default="",
+        help=(
+            "Optional path to a brand profile JSON (colors, font, caption_style, safe_zones, "
+            "sfx). The Director locks it as the brand kit; omitted means a default kit is derived."
+        ),
+    )
+    make.add_argument(
+        "--authoring-only",
+        action="store_true",
+        help=(
+            "Supplied-b-roll mode: skip IdealCuts and Kling generation; require --broll; "
+            "force Gemini asset descriptions before authoring."
+        ),
+    )
     return parser
+
+
+def _load_brand_profile(path: str) -> dict[str, Any] | None:
+    """Load a brand profile JSON from ``--brand-profile`` (empty string → no profile)."""
+    if not path:
+        return None
+    import json
+
+    raw = Path(path).read_text(encoding="utf-8")
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        _cli_error(f"--brand-profile must be a JSON object, got {type(data).__name__}")
+    return data
 
 
 def _new_run_dir() -> Path:
@@ -266,48 +548,68 @@ def _new_run_dir() -> Path:
     return run_dir
 
 
-def build_default_pipeline(run_dir: Path, settings: Settings | None = None) -> Pipeline:
+def build_default_pipeline(
+    run_dir: Path,
+    settings: Settings | None = None,
+    *,
+    authoring_only: bool = False,
+    brand_profile: dict[str, Any] | None = None,
+) -> Pipeline:
     """Wire the real services in-process (ADR 0003): MediaService, AuthoringService, and an async
     RenderService behind the render adapter, with the live authoring and review models.
 
-    Every choice that varies between runs -- the authoring client and model, the creation style, the
-    reviewer/advisor models, and the review round cap -- comes from ``settings`` (loaded from
-    ``settings.json``; see ``app.settings``), so switching any of them is a config edit, not a code
-    change. Every render output and agent artifact for this run is persisted under ``run_dir``
-    (``renders/<timestamp>/``): the render blob store is rooted there, and AuthoringService writes
-    its stills/previews, ``composition.json``, and per-round review feedback there too.
-
-    The model adapters are imported lazily so the CLI module (and its deterministic tests) load
-    without the optional provider SDKs; the prerequisites surface only when a real run is launched.
-    The default authoring client is Claude Code (ADR 0006) -- it authors through the Claude Code
-    CLI's own auth, so a real run needs no API key. Because it is image-blind, it is paired with a
-    Gemini ``VisionAdvisor`` (ADR 0007): the loop offers it ``consult_placement`` (render a still,
-    ask Gemini, get text advice) as its vision channel; a sighted client ignores the advisor.
+    When ``authoring_only`` is true, IdealCuts and GenerateBroll are omitted and the Gemini
+    describer is always wired (requires API keys in the environment).
     """
     from videogen.agent import creation_styles
-    from videogen.agent.gemini_review import GeminiReviewAgent
     from videogen.agent.gemini_vision import GeminiVisionAdvisor
     from videogen.backends.remotion import RemotionBackend
     from videogen.services.authoring import AuthoringService
     from videogen.services.render import RenderService, RenderServiceRenderer
     from videogen.stores.blobs import FilesystemBlobStore
 
+    from videogen.agent.sfx import SFXAgent
+
     settings = settings or load_settings()
+    # The Director's locked design language (ADR 0008). Built from the optional brand profile, else
+    # sensible defaults. v1 derivation ignores the brief (deterministic); frame meta fills in at run
+    # time. Its StyleBrief projection styles the stat-viz clips, superseding DEFAULT_STYLE_BRIEF.
+    from videogen.agent.brand_kit import build_brand_kit
+
+    brand_kit = build_brand_kit(profile=brand_profile)
     backend = RemotionBackend()
     render_service = RenderService(backend=backend, blobs=FilesystemBlobStore(run_dir))
     renderer = RenderServiceRenderer(render_service)
-    broll_fetcher = None
-    fetched_broll_dir = None
-    if settings.broll_fetch:
-        from videogen.agent.perplexity_broll import PerplexityBrollAgent
+    model_client = _build_authoring_client(settings)
 
-        broll_fetcher = PerplexityBrollAgent()
-        fetched_broll_dir = run_dir / "fetched_broll"
+    ideal_cuts_agent = None
+    generate_broll_agent = None
+    generated_broll_dir = None
     describer = None
-    if settings.asset_descriptions:
+
+    if authoring_only:
         from videogen.agent.gemini_describe import GeminiDescribeAgent
 
         describer = GeminiDescribeAgent(model=settings.describer_model)
+    else:
+        from videogen.agent.generate_broll import GenerateBrollAgent
+        from videogen.agent.stat_viz import StatVizRenderer
+        from videogen.creation.nano_banana import NanoBananaCreator
+
+        creator = NanoBananaCreator(model=settings.broll_image_model)
+        # IdealCuts is folded into the Director (ADR 0008); no standalone cut-planner is wired.
+        generate_broll_agent = GenerateBrollAgent(
+            model_client,
+            creator,
+            stat_viz_renderer=StatVizRenderer(),
+            style_brief=brand_kit.to_style_brief(),
+        )
+        generated_broll_dir = run_dir / "generated_broll"
+        if settings.asset_descriptions:
+            from videogen.agent.gemini_describe import GeminiDescribeAgent
+
+            describer = GeminiDescribeAgent(model=settings.describer_model)
+
     return Pipeline(
         media=_real_media(),
         authoring=AuthoringService(
@@ -316,15 +618,32 @@ def build_default_pipeline(run_dir: Path, settings: Settings | None = None) -> P
             system=creation_styles.get_style(settings.creation_style),
         ),
         renderer=renderer,
-        model_client=_build_authoring_client(settings),
-        reviewer=GeminiReviewAgent(model=settings.reviewer_model),
+        model_client=model_client,
+        reviewer=_build_reviewer(settings),
         advisor=GeminiVisionAdvisor(model=settings.advisor_model),
         max_review_rounds=settings.max_review_rounds,
-        broll_fetcher=broll_fetcher,
-        broll_fetch_limit=settings.broll_fetch_limit,
-        fetched_broll_dir=fetched_broll_dir,
+        platform=settings.platform,
+        authoring_only=authoring_only,
+        ideal_cuts_agent=ideal_cuts_agent,
+        generate_broll_agent=generate_broll_agent,
+        generated_broll_dir=generated_broll_dir,
+        audio_decider_agent=SFXAgent(),  # the single SFX authority (ADR 0009), deterministic
         describer=describer,
+        brand_kit=brand_kit,
     )
+
+
+def _build_reviewer(settings: Settings) -> ReviewAgent:
+    """Pick the finalization reviewer (story 14): the Claude-Code JSON reviewer by default, or the
+    Gemini full-motion reviewer when ``review_client = "gemini"``. Both implement ReviewAgent; Gemini
+    is kept available, only the default changes."""
+    if settings.review_client == "gemini":
+        from videogen.agent.gemini_review import GeminiReviewAgent
+
+        return GeminiReviewAgent(model=settings.reviewer_model)
+    from videogen.agent.claude_review import ClaudeReviewAgent
+
+    return ClaudeReviewAgent(model=settings.authoring_model or "claude-sonnet-4-6")
 
 
 def _build_authoring_client(settings: Settings) -> ModelClient:
@@ -360,15 +679,37 @@ def main(argv: Sequence[str] | None = None, *, pipeline: Pipeline | None = None)
     from dotenv import load_dotenv
 
     from videogen import log
+
     load_dotenv()
     args = _build_parser().parse_args(argv)
-    broll = _split_broll(args.broll)
+    authoring_only = bool(getattr(args, "authoring_only", False))
+
     if pipeline is not None:
-        pipe = pipeline  # tests inject a fake pipeline; no run folder or logging side effects
+        # Injected test pipelines use FakeMedia and do not require on-disk b-roll paths.
+        entries = _split_broll(args.broll)
+        if authoring_only:
+            if not entries:
+                _cli_error(
+                    "--authoring-only requires --broll "
+                    "(comma-separated media files and/or a folder of b-roll)."
+                )
+            if not _has_gemini_api_key():
+                _cli_error(
+                    "--authoring-only requires Gemini for asset descriptions; "
+                    "authenticate via ADC (GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT) or set GOOGLE_API_KEY/GEMINI_API_KEY."
+                )
+        broll = entries
+        pipe = pipeline
     else:
+        broll = _prepare_broll_for_make(broll_arg=args.broll, authoring_only=authoring_only)
         run_dir = _new_run_dir()
         log.init(run_dir)
-        pipe = build_default_pipeline(run_dir)
+        log.get().pipeline_mode(authoring_only=authoring_only)
+        pipe = build_default_pipeline(
+            run_dir,
+            authoring_only=authoring_only,
+            brand_profile=_load_brand_profile(args.brand_profile),
+        )
     try:
         out = pipe.run(host=args.host, broll=broll, brief=args.brief)
     except PipelineError as exc:

@@ -3,9 +3,9 @@
 Talking-head-first short-form video generator: a creator's raw recording + b-roll + a
 brief become a polished 9:16 short, driven entirely by a declarative **Composition** JSON.
 
-Design is captured in [`CONTEXT.md`](CONTEXT.md) (glossary), [`docs/adr/`](docs/adr/)
-(decisions), and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (build order). Per-phase
-specs live in [`prd/`](prd/).
+Design is captured in `[CONTEXT.md](CONTEXT.md)` (glossary), `[docs/adr/](docs/adr/)`
+(decisions), and `[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)` (build order). Per-phase
+specs live in `[prd/](prd/)`.
 
 > **Status: Phase 9 (end-to-end CLI).** The whole pipeline is wired behind one command: a host
 > recording + optional b-roll + a free-text brief → ingest/probe/transcribe → an authoring agent
@@ -29,7 +29,7 @@ tests/
 
 ## Setup
 
-Prerequisites: [`uv`](https://docs.astral.sh/uv/), Node 18+ / npm, and `ffmpeg`/`ffprobe` on
+Prerequisites: `[uv](https://docs.astral.sh/uv/)`, Node 18+ / npm, and `ffmpeg`/`ffprobe` on
 `PATH`. A live `videogen make` run also needs transcription (faster-whisper) and the two model
 SDKs, plus their keys: `ANTHROPIC_API_KEY` (authoring) and `GOOGLE_API_KEY` or `GEMINI_API_KEY`
 (the video reviewer).
@@ -73,6 +73,8 @@ fast unit + snapshot tests with:
 uv run pytest -m "not integration"
 ```
 
+
+
 ## Make a video
 
 The `videogen make` command (`app/cli.py`) is the single entry point over the whole stack. It is
@@ -95,4 +97,3 @@ failure is reported with the stage that broke and a non-zero exit.
 The reference-video full check (a split-screen hook, the host with a slow zoom, a b-roll cut, and
 synced captions) is the human-judged acceptance target; the automated guarantee that the pipeline
 stays wired is the gated E2E smoke (`tests/test_e2e.py`, marked `integration`).
-

@@ -1,4 +1,8 @@
-"""Authoring tool-use loop: one validated op per turn, with on-demand vision (Phase 8, ADR 0004).
+"""Director tool-use loop: one validated op per turn, with on-demand vision (ADR 0004, ADR 0008).
+
+Formerly the AuthoringLoop; renamed to DirectorLoop (ADR 0008). The agent that drives this loop is
+the Director -- it authors the Composition through validated Builder ops and (in later phases)
+dispatches specialist worker agents whose proposals it turns into ops.
 
 The loop is the runtime that turns a model's tool calls into a Composition. It presents the system
 prompt, tool specs, and structured perception to a ``ModelClient``; receives one tool call; and:
@@ -24,7 +28,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from videogen import log
+from videogen import log, tracing
 from videogen.agent.model import (
     HistoryItem,
     ModelClient,
@@ -36,9 +40,12 @@ from videogen.agent.model import (
 )
 from videogen.agent.perception import Manifest, assemble_perception
 from videogen.agent.prompts import SYSTEM_PROMPT
+from videogen.agent.dispatch import WorkerDispatcher
 from videogen.agent.tools import (
     ADVICE_OP,
     CONSULT_PLACEMENT_TOOL,
+    DISPATCH_OPS,
+    DISPATCH_TOOLS,
     FINISH_OP,
     MUTATING_OPS,
     TOOLS,
@@ -57,7 +64,7 @@ _PREVIEW_SAMPLES = 3  # frames sampled across a scene's span for the preview str
 
 
 @dataclass(frozen=True)
-class AuthoringResult:
+class DirectorResult:
     """The terminal state of an authoring run: the document, its report, and how the loop ended."""
 
     composition: Composition
@@ -66,7 +73,7 @@ class AuthoringResult:
     ops_used: int
 
 
-class AuthoringLoop:
+class DirectorLoop:
     """Drives a ModelClient through validated Builder ops to a finished, valid Composition."""
 
     def __init__(
@@ -83,6 +90,10 @@ class AuthoringLoop:
         max_ops: int = 40,
         artifacts_dir: Path | None = None,
         advisor: VisionAdvisor | None = None,
+        dispatchers: dict[str, WorkerDispatcher] | None = None,
+        brand_kit: object | None = None,
+        max_dispatch_per_worker: int = 2,
+        timeline_skeleton: str = "",
     ) -> None:
         self._client = client
         self._builder = builder
@@ -95,17 +106,39 @@ class AuthoringLoop:
         self._max_ops = max_ops
         self._artifacts_dir = artifacts_dir
         self._advisor = advisor
+        # Worker dispatch (ADR 0008): a small registry of dispatchers and a per-worker budget,
+        # tracked separately from the Builder-op budget so a dispatch never starves authoring turns.
+        self._dispatchers = dispatchers or {}
+        self._brand_kit = brand_kit
+        self._max_dispatch_per_worker = max_dispatch_per_worker
+        self._dispatch_counts: dict[str, int] = {}
+        self._timeline_skeleton = timeline_skeleton
 
-    def run(self) -> AuthoringResult:
+    def run(self) -> DirectorResult:
         history: list[HistoryItem] = [UserMessage(self._opening_message())]
         ops_used = 0
         terminated_clean = False
         tools = self._advertised_tools()
         log.get().agent_start(self._max_ops)
 
+        model = getattr(self._client, "model", "unknown") or "unknown"
+        turn = 0
         while ops_used < self._max_ops:
-            assistant = self._client.next_turn(
-                system=self._system, history=history, tools=tools
+            turn += 1
+            # The last history item is the user/tool message the model is responding to.
+            last_user_text = _last_user_text(history)
+            with tracing.model_generation(
+                f"authoring-turn-{turn}",
+                system=self._system,
+                user_message=last_user_text,
+                model=model,
+            ):
+                assistant = self._client.next_turn(
+                    system=self._system, history=history, tools=tools
+                )
+            tracing.update_generation_output(
+                assistant.text,
+                tool_calls=[tc.name for tc in assistant.tool_calls],
             )
             history.append(assistant)
             log.get().agent_narration(assistant.text)
@@ -114,7 +147,10 @@ class AuthoringLoop:
 
             results: list[ToolResult] = []
             for tool_call in assistant.tool_calls:
-                ops_used += 1
+                # Worker dispatches (ADR 0008) draw from a separate per-worker budget, so they do
+                # NOT consume the Builder-op budget that bounds authoring cost.
+                if tool_call.name not in DISPATCH_OPS:
+                    ops_used += 1
                 log.get().agent_tool_call(tool_call.name, dict(tool_call.args))
                 result, finished = self._dispatch(tool_call)
                 results.append(result)
@@ -127,7 +163,7 @@ class AuthoringLoop:
                 break
 
         log.get().agent_done(ops_used, terminated_clean)
-        return AuthoringResult(
+        return DirectorResult(
             composition=self._builder.composition,
             report=self._builder.validate(),
             terminated_clean=terminated_clean,
@@ -143,12 +179,19 @@ class AuthoringLoop:
         sighted client, or no advisor) the full ``TOOLS`` list is used unchanged."""
         blind = not getattr(self._client, "consumes_images", True)
         if blind and self._advisor is not None and self._backend is not None:
-            return [t for t in TOOLS if t.name not in VISION_OPS] + [CONSULT_PLACEMENT_TOOL]
-        return list(TOOLS)
+            tools = [t for t in TOOLS if t.name not in VISION_OPS] + [CONSULT_PLACEMENT_TOOL]
+        else:
+            tools = list(TOOLS)
+        # Advertise each dispatch tool only when its worker is wired (ADR 0008).
+        for op_name, spec in DISPATCH_TOOLS.items():
+            if op_name in self._dispatchers:
+                tools.append(spec)
+        return tools
 
     def _opening_message(self) -> str:
         perception = assemble_perception(self._builder.composition, self._manifest)
-        return f"Brief:\n{self._brief}\n\n{perception}"
+        skeleton = f"\n\n{self._timeline_skeleton}" if self._timeline_skeleton else ""
+        return f"Brief:\n{self._brief}{skeleton}\n\n{perception}"
 
     def _dispatch(self, call: ToolCall) -> tuple[ToolResult, bool]:
         if call.name in MUTATING_OPS:
@@ -157,9 +200,92 @@ class AuthoringLoop:
             return self._dispatch_vision(call), False
         if call.name == ADVICE_OP:
             return self._dispatch_advice(call), False
+        if call.name in DISPATCH_OPS:
+            return self._dispatch_worker(call), False
         if call.name == FINISH_OP:
             return self._dispatch_finish(call)
         return ToolResult(call.id, text=f"unknown tool: {call.name!r}"), False
+
+    def _dispatch_worker(self, call: ToolCall) -> ToolResult:
+        """Run a dispatched worker (ADR 0008): enforce its dispatch budget, invoke the dispatcher,
+        register any assets it produced into the Builder, and return its proposal plus fresh
+        perception so the Director can place the new assets on its next turns."""
+        dispatcher = self._dispatchers.get(call.name)
+        if dispatcher is None:
+            return ToolResult(call.id, text=f"dispatch unavailable: no '{call.name}' worker wired")
+
+        used = self._dispatch_counts.get(call.name, 0)
+        if used >= self._max_dispatch_per_worker:
+            self._store.note(self._doc_id, op=f"{call.name}[budget-exhausted]")
+            return ToolResult(
+                call.id,
+                text=(
+                    f"dispatch budget exhausted for '{call.name}' "
+                    f"({self._max_dispatch_per_worker} max) -- proceed with the assets you have.\n\n"
+                    f"{self._perception()}"
+                ),
+            )
+        self._dispatch_counts[call.name] = used + 1
+
+        guidance: dict[str, object] = {
+            "guidance": str(call.args.get("guidance", "")),
+            "brand_kit": self._brand_kit_tokens(),
+        }
+        # The Director owns the event timeline (ADR 0009): build it from the live composition and
+        # hand it to the SFX worker rather than have the worker re-derive it.
+        if call.name == "dispatch_sfx":
+            from videogen.agent.event_timeline import build_event_timeline
+
+            guidance["event_timeline"] = build_event_timeline(self._builder.composition)
+        try:
+            proposal = dispatcher(guidance)
+        except Exception as exc:  # a worker failure must not crash the Director
+            self._store.note(self._doc_id, op=f"{call.name}[failed]")
+            log.get().agent_tool_error(call.name, str(exc))
+            return ToolResult(call.id, text=f"worker dispatch failed: {exc}\n\n{self._perception()}")
+
+        registered, failed = self._register_assets(proposal.new_assets)
+        sfx_applied = self._apply_scene_audio(proposal.scene_audio)
+        self._store.note(self._doc_id, op=call.name)
+        log.get().agent_tool_ok(call.name)
+        text = proposal.proposal_text
+        if registered:
+            text += (
+                "\n\nNew assets registered -- place them with fill_region/add_overlay: "
+                + ", ".join(registered)
+            )
+        if failed:
+            text += "\n\nAssets that could not be registered (id clash): " + ", ".join(failed)
+        if sfx_applied:
+            text += f"\n\nSFX placed on {sfx_applied} cut(s) via scene.audio."
+        return ToolResult(call.id, text=f"{text}\n\n{self._perception()}")
+
+    def _register_assets(self, new_assets: tuple[object, ...]) -> tuple[list[str], list[str]]:
+        ok: list[str] = []
+        bad: list[str] = []
+        for na in new_assets:
+            result = self._builder.add_asset(na.asset_id, na.asset)  # type: ignore[attr-defined]
+            if result.ok:
+                self._store.commit(self._doc_id, self._builder.composition, op="add_asset")
+                ok.append(na.asset_id)  # type: ignore[attr-defined]
+            else:
+                bad.append(na.asset_id)  # type: ignore[attr-defined]
+        return ok, bad
+
+    def _apply_scene_audio(self, scene_audio: tuple[tuple[str, str], ...]) -> int:
+        applied = 0
+        for scene_id, sound in scene_audio:
+            result = self._builder.set_scene_audio(scene_id, sound, reason="SFXAgent")
+            if result.ok:
+                self._store.commit(self._doc_id, self._builder.composition, op="set_scene_audio")
+                applied += 1
+        return applied
+
+    def _brand_kit_tokens(self) -> dict[str, object] | None:
+        if self._brand_kit is None:
+            return None
+        tokens = getattr(self._brand_kit, "tokens", None)
+        return tokens() if callable(tokens) else None
 
     def _dispatch_mutation(self, call: ToolCall) -> ToolResult:
         try:
@@ -262,3 +388,14 @@ class AuthoringLoop:
             if asset.id == self._manifest.voiceover and asset.width and asset.height:
                 return {"width": asset.width, "height": asset.height}
         return {}
+
+
+def _last_user_text(history: list[HistoryItem]) -> str:
+    """Return the text of the most recent UserMessage or ToolResultsMessage for tracing input."""
+    for item in reversed(history):
+        if isinstance(item, UserMessage):
+            return item.text[:500]
+        if isinstance(item, ToolResultsMessage):
+            texts = [r.text or "" for r in item.results if r.text]
+            return " | ".join(texts)[:500]
+    return ""

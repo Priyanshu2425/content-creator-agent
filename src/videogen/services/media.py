@@ -151,8 +151,10 @@ def _ffprobe(path: Path) -> ProbeResult:
     )
     data = json.loads(proc.stdout)
     stream = data["streams"][0]
+    fmt = data.get("format", {})
+    raw_dur = fmt.get("duration")
     return ProbeResult(
-        duration=float(data["format"]["duration"]),
+        duration=float(raw_dur) if raw_dur is not None else 0.0,
         width=int(stream["width"]),
         height=int(stream["height"]),
         fps=_parse_fraction(stream["r_frame_rate"]),

@@ -24,7 +24,7 @@ def test_absent_file_uses_all_defaults(tmp_path: Path) -> None:
     assert settings.authoring_client == "claude-code"
     assert settings.authoring_model is None
     assert settings.creation_style == "classic"
-    assert settings.reviewer_model == "gemini-2.5-flash"
+    assert settings.reviewer_model == "gemini-2.5-flash-lite"
     assert settings.max_review_rounds == 2
 
 

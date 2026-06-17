@@ -17,6 +17,8 @@ Composition -> IR function.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from videogen.kernel.composition import Composition, Overlay, RegionName, Scene, TransitionKind
 from videogen.kernel.ir import (
     IR,
@@ -36,6 +38,17 @@ from videogen.plugins.captions.styles import compile_caption_style
 # v1 output canvas: vertical 9:16, ready for short-form platforms without reformatting.
 DEFAULT_WIDTH = 1080
 DEFAULT_HEIGHT = 1920
+
+# SFX files shipped with the repo at sfx/transitions/. Absolute path so _stage_assets can copy
+# them into the Remotion public dir at render time, same as any other AudioLayer source.
+_SFX_DIR = Path(__file__).resolve().parents[3] / "sfx" / "transitions"
+
+# Durations from sfx/transitions/*.md — used to centre each SFX on the cut boundary.
+_SFX_DURATIONS: dict[str, float] = {
+    "click": 0.23,
+    "whoosh": 0.57,
+    "dramatic_whoosh": 1.92,
+}
 
 
 def compile_ir(
@@ -57,12 +70,27 @@ def compile_ir(
 
     # Base layer: resolve each Scene's Layout via the registry and let the plugin place its Region
     # items. Layers are kept grouped by Scene id so sparse transitions can cross-blend a boundary.
+    voiceover_src = composition.assets[composition.voiceover.asset].src
     scene_layers: dict[str, list[Layer]] = {}
     for scene in composition.scenes:
         contract = registry.get_layout(scene.layout)
         if contract is None:  # unregistered layout: rejected by the Validator before submit
             continue
-        scene_layers[scene.id] = contract.to_ir(scene, ctx)
+        raw_layers = contract.to_ir(scene, ctx)
+        # A-roll sync: the host video must seek to scene.start in the source so it stays
+        # frame-accurate with the voiceover audio. Remotion's startFrom defaults to 0 when
+        # in_point is absent, which drifts every A-roll scene after the first one.
+        scene_layers[scene.id] = [
+            layer.model_copy(update={"in_point": scene.start})
+            if (
+                isinstance(layer, MediaLayer)
+                and layer.content == "video"
+                and layer.src == voiceover_src
+                and layer.in_point is None
+            )
+            else layer
+            for layer in raw_layers
+        ]
 
     _apply_transitions(composition, scene_layers, duration=duration)
 
@@ -79,11 +107,40 @@ def compile_ir(
     voiceover_asset = composition.assets[composition.voiceover.asset]
     layers.append(AudioLayer(start=0.0, end=duration, z=0, src=voiceover_asset.src))
 
+    # SFX: one short AudioLayer per scene annotated by AudioDeciderAgent, centred on the scene's
+    # start time so the sound straddles the cut boundary. _stage_assets stages the files
+    # from sfx/transitions/ into the Remotion public dir at render time like any other asset.
+    for scene in composition.scenes:
+        if scene.audio is None:
+            continue
+        sound = scene.audio.sound.value  # "click" | "whoosh" | "dramatic_whoosh"
+        sfx_dur = _SFX_DURATIONS.get(sound, 0.23)
+        sfx_start = max(0.0, scene.start - sfx_dur / 2)
+        sfx_end = min(duration, scene.start + sfx_dur / 2)
+        if sfx_end > sfx_start:
+            layers.append(
+                AudioLayer(
+                    start=sfx_start,
+                    end=sfx_end,
+                    z=0,
+                    src=str(_SFX_DIR / f"{sound}.mp3"),
+                )
+            )
+
     # Captions: each compiles to one `text` Layer at its own high `z` (above the media layers), the
     # style baked into visual props plus, for `kinetic`, opacity/scale keyframe tracks. The compiler
     # owns the style->IR mapping so the backend interprets only the three Layer kinds (ADR 0002).
     for caption in composition.captions:
         style = compile_caption_style(caption.style, caption.start, caption.end)
+        if caption.words:
+            # Karaoke line: one run per word carrying its spoken window, so the backend can
+            # highlight the current word. The whole line is on screen for the caption's span.
+            runs = [
+                TextRun(text=word.text, start=word.start, end=word.end) for word in caption.words
+            ]
+        else:
+            # A plain single cue (no per-word timing): one static run.
+            runs = [TextRun(text=caption.text, emphasis=style.emphasis)]
         layers.append(
             TextLayer(
                 start=caption.start,
@@ -91,7 +148,7 @@ def compile_ir(
                 z=caption.z,
                 opacity=style.opacity,
                 transform=style.transform,
-                runs=[TextRun(text=caption.text, emphasis=style.emphasis)],
+                runs=runs,
                 style=caption.style.value,
                 props=style.props,
             )
@@ -121,8 +178,9 @@ def _apply_transitions(
 
     for transition in composition.transitions:
         if transition.kind is TransitionKind.whoosh:
-            # Hard visual cut — no opacity blend. Audio SFX layer will be injected here once the
-            # sfx/transitions/ folder is wired into the compile context (see TODO in compile_ir).
+            # Hard visual smash cut — no opacity blend and NO sound (ADR 0009): the whoosh
+            # transition is purely visual. Any whoosh sound is owned solely by the SFX layer
+            # (scene.audio, placed by the SFXAgent), so the two never double-fire on a cut.
             continue
         if transition.kind is not TransitionKind.crossfade:
             continue

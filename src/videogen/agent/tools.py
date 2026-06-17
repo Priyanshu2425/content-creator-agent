@@ -49,6 +49,7 @@ MUTATING_OPS = {
     "add_scene",
     "fill_region",
     "add_overlay",
+    "add_title",
     "add_caption",
     "add_captions_from_transcript",
     "set_transition",
@@ -57,6 +58,10 @@ MUTATING_OPS = {
 }
 VISION_OPS = {"render_still", "scene_preview"}
 FINISH_OP = "finish"
+# Worker-dispatch ops (ADR 0008): the Director runs a specialist worker as a tool. Kept OUT of TOOLS
+# and routed separately -- the loop advertises a dispatch tool only when its worker is wired, and a
+# dispatch draws from a small per-worker dispatch budget rather than the Builder-op budget.
+DISPATCH_OPS = {"dispatch_broll", "dispatch_text_hook", "dispatch_sfx"}
 # The text-return vision channel for image-blind clients (ADR 0007). Kept OUT of TOOLS and the sets
 # above: the loop swaps it in for VISION_OPS only when the client cannot see and an advisor exists.
 ADVICE_OP = "consult_placement"
@@ -115,6 +120,14 @@ def apply_op(
         )
     if name == "add_overlay":
         return builder.add_overlay(build_overlay(args))
+    if name == "add_title":
+        return builder.add_title(
+            cast(str, args["text"]),
+            cast(float, args["start"]),
+            cast(float, args["end"]),
+            placement=cast(str, args.get("placement", "upper-third")),
+            z=cast(int, args.get("z", 0)),
+        )
     if name == "add_caption":
         return builder.add_caption(
             cast(str, args["text"]),
@@ -229,6 +242,26 @@ TOOLS: list[ToolSpec] = [
                 },
             },
             "required": ["type", "start", "end"],
+        },
+    ),
+    ToolSpec(
+        name="add_title",
+        description=(
+            "Place a static on-screen text hook -- a single short headline on the opening 1-3s, "
+            "distinct from the captions track (not transcript-synced, not word-animated). Use it "
+            "for the chosen TextHook candidate; keep it inside the reserved hook window and clear "
+            "of the caption band. Placement is 'upper-third' (default) or 'center'."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "the headline text"},
+                "start": _number("title start, seconds (frame one for a hook)"),
+                "end": _number("title end, seconds"),
+                "placement": {"type": "string", "enum": ["upper-third", "center"]},
+                "z": {"type": "integer", "description": "paint order; higher sits on top"},
+            },
+            "required": ["text", "start", "end"],
         },
     ),
     ToolSpec(
@@ -353,6 +386,77 @@ CONSULT_PLACEMENT_TOOL = ToolSpec(
         "required": ["t", "question"],
     },
 )
+
+
+# Worker-dispatch tools (DISPATCH_OPS). Kept OUT of TOOLS: the loop advertises a dispatch tool only
+# when its worker dispatcher is wired (ADR 0008).
+DISPATCH_BROLL_TOOL = ToolSpec(
+    name="dispatch_broll",
+    description=(
+        "Dispatch the b-roll worker to generate visual support for this video. It produces "
+        "standalone b-roll assets (generated stills + animated stat-viz clips) styled to the brand "
+        "kit, and returns a shot-list proposal naming each new asset id and what it depicts. The "
+        "new assets are registered into the library for you; you then place them yourself with "
+        "fill_region/add_overlay. Costs one dispatch from a small budget -- call it once when you "
+        "know the video needs b-roll, not per shot, and skip it entirely if it does not."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "guidance": {
+                "type": "string",
+                "description": "optional focus for the worker, e.g. which moments most need support",
+            }
+        },
+        "required": [],
+    },
+)
+
+
+DISPATCH_TEXT_HOOK_TOOL = ToolSpec(
+    name="dispatch_text_hook",
+    description=(
+        "Dispatch the text-hook worker to propose on-screen headline hooks for the opening 1-3s. "
+        "It reads the transcript and returns ranked candidates (each a different angle from the "
+        "spoken hook) with a recommended pick. Nothing is placed for you -- choose one and place it "
+        "with add_title inside the hook window, distinct from the captions. Costs one dispatch."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "guidance": {
+                "type": "string",
+                "description": "optional steer, e.g. the audience or angle to favour",
+            }
+        },
+        "required": [],
+    },
+)
+
+DISPATCH_SFX_TOOL = ToolSpec(
+    name="dispatch_sfx",
+    description=(
+        "Dispatch the SFX worker to place sound effects on the meaningful cuts. Call it LATE, after "
+        "the visuals are placed, so it sees the real timeline. It classifies your cuts into events, "
+        "maps them to the sound palette within the density budget (restraint is the job -- silence "
+        "is the default), and the placements are applied to the cuts for you via scene.audio. The "
+        "SFX layer is the single sound authority; whoosh transitions stay silent. Costs one dispatch."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "guidance": {"type": "string", "description": "optional steer for emphasis"}
+        },
+        "required": [],
+    },
+)
+
+# Maps each dispatch op to the tool the loop advertises when that worker is wired (ADR 0008).
+DISPATCH_TOOLS: dict[str, ToolSpec] = {
+    "dispatch_broll": DISPATCH_BROLL_TOOL,
+    "dispatch_text_hook": DISPATCH_TEXT_HOOK_TOOL,
+    "dispatch_sfx": DISPATCH_SFX_TOOL,
+}
 
 
 # --- DRAFT tools: defined but NOT advertised to or dispatched by the agent yet (TODO 3) ---------

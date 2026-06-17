@@ -10,7 +10,7 @@ Requires GEMINI_API_KEY or GOOGLE_API_KEY in the environment.
 
 from __future__ import annotations
 
-import os
+import time
 import uuid
 from collections.abc import Sequence
 from typing import Any
@@ -112,6 +112,10 @@ class GeminiModelClient:
         self._model = model
         self._client = client if client is not None else _build_client(api_key)
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def next_turn(
         self,
         *,
@@ -119,25 +123,35 @@ class GeminiModelClient:
         history: Sequence[HistoryItem],
         tools: Sequence[ToolSpec],
     ) -> AssistantTurn:
+        from videogen import log
+
         config: dict[str, Any] = {"system_instruction": system}
         tool_list = _to_tools(tools)
         if tool_list:
             config["tools"] = tool_list
+        t0 = time.monotonic()
         response = self._client.models.generate_content(
             model=self._model,
             contents=_to_contents(history),
             config=config,
         )
+        usage = getattr(response, "usage_metadata", None)
+        log.get().llm_call(
+            agent="GeminiModelClient",
+            model=self._model,
+            input_tokens=getattr(usage, "prompt_token_count", None),
+            output_tokens=getattr(usage, "candidates_token_count", None),
+            duration_ms=int((time.monotonic() - t0) * 1000),
+        )
         return _parse_response(response)
 
 
 def _build_client(api_key: str | None) -> Any:
-    try:
-        import google.genai as genai
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "the authoring model needs the google-genai SDK; install it with "
-            "`uv sync --extra review` and set GEMINI_API_KEY (or GOOGLE_API_KEY)"
-        ) from exc
-    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    return genai.Client(api_key=key) if key else genai.Client()
+    from videogen.genai_client import build_genai_client
+
+    return build_genai_client(
+        api_key,
+        install_hint=(
+            "the authoring model needs the google-genai SDK; install it with `uv sync --extra review`, then authenticate via ADC (GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT) or an API key"
+        ),
+    )
