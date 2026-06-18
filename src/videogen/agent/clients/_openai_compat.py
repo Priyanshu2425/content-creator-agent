@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
@@ -135,6 +136,8 @@ class OpenAICompatModelClient:
         extra_body: dict[str, Any] | None = None,
         api_key: str | None = None,
         client: Any | None = None,
+        max_retries: int = 10,
+        retry_base_seconds: float = 5.0,
     ) -> None:
         self._model = model
         self._max_tokens = max_tokens
@@ -142,6 +145,8 @@ class OpenAICompatModelClient:
         self._top_p = top_p
         self._extra_body = extra_body
         self._client = client if client is not None else self._build_client(api_key)
+        self._max_retries = max_retries
+        self._retry_base_seconds = retry_base_seconds
 
     @property
     def model(self) -> str:
@@ -168,8 +173,26 @@ class OpenAICompatModelClient:
         if tools:
             kwargs["tools"] = to_tools(tools)
             kwargs["tool_choice"] = "auto"
-        stream = self._client.chat.completions.create(**kwargs)
-        return collect_stream(stream)
+
+        attempt = 0
+        while True:
+            try:
+                stream = self._client.chat.completions.create(**kwargs)
+                return collect_stream(stream)
+            except Exception as exc:
+                if not _is_rate_limit(exc) or attempt >= self._max_retries:
+                    raise
+                wait = _retry_after(exc) or self._retry_base_seconds * (2 ** attempt)
+                attempt += 1
+                from videogen import log
+                log.get().agent_event_complete(
+                    "rate-limit-retry",
+                    duration_ms=0,
+                    attempt=attempt,
+                    wait_seconds=round(wait, 1),
+                    model=self._model,
+                )
+                time.sleep(wait)
 
     @classmethod
     def _build_client(cls, api_key: str | None) -> Any:
@@ -186,3 +209,38 @@ class OpenAICompatModelClient:
                 f"{cls.env_var} is not set; export it or pass api_key= explicitly"
             )
         return OpenAI(base_url=cls.base_url, api_key=key)
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    """True for HTTP 429 rate-limit errors from the openai SDK."""
+    try:
+        from openai import RateLimitError
+        return isinstance(exc, RateLimitError)
+    except ImportError:
+        return getattr(exc, "status_code", None) == 429
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """Extract the provider's suggested retry-after delay (seconds) from a 429, if present.
+
+    Handles two OpenRouter formats:
+    - Venice provider: metadata.retry_after_seconds (float)
+    - OpenRouter RPM limiter: metadata.headers.X-RateLimit-Reset (epoch milliseconds)
+    """
+    try:
+        body = getattr(exc, "body", None) or {}
+        metadata = body.get("error", {}).get("metadata", {}) or {}
+
+        # Format 1: Venice — retry_after_seconds directly in metadata
+        seconds = metadata.get("retry_after_seconds")
+        if seconds is not None:
+            return float(seconds) + 1.0
+
+        # Format 2: OpenRouter RPM limiter — X-RateLimit-Reset as epoch milliseconds
+        reset_ms = (metadata.get("headers") or {}).get("X-RateLimit-Reset")
+        if reset_ms is not None:
+            wait = float(reset_ms) / 1000.0 - time.time()
+            return max(wait + 1.0, 1.0)  # at least 1s, plus a 1s buffer
+    except Exception:
+        pass
+    return None

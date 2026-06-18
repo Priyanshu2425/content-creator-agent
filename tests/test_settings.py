@@ -21,9 +21,8 @@ from videogen.app.settings import Settings, load_settings
 def test_absent_file_uses_all_defaults(tmp_path: Path) -> None:
     settings = load_settings(tmp_path / "nope.json")
 
-    assert settings.authoring_client == "claude-code"
+    assert settings.authoring_client == "gemini"
     assert settings.authoring_model is None
-    assert settings.creation_style == "classic"
     assert settings.reviewer_model == "gemini-2.5-flash-lite"
     assert settings.max_review_rounds == 2
 
@@ -31,14 +30,14 @@ def test_absent_file_uses_all_defaults(tmp_path: Path) -> None:
 def test_file_overrides_named_fields_and_keeps_other_defaults(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     path.write_text(
-        json.dumps({"creation_style": "split-broll", "authoring_model": "claude-opus-4-7"})
+        json.dumps({"platform": "TikTok", "authoring_model": "claude-opus-4-7"})
     )
 
     settings = load_settings(path)
 
-    assert settings.creation_style == "split-broll"  # overridden
+    assert settings.platform == "TikTok"  # overridden
     assert settings.authoring_model == "claude-opus-4-7"  # overridden
-    assert settings.authoring_client == "claude-code"  # untouched default
+    assert settings.authoring_client == "gemini"  # untouched default
     assert settings.advisor_model == "gemini-2.5-flash"  # untouched default
 
 

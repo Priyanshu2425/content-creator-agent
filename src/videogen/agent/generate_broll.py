@@ -365,9 +365,16 @@ class GenerateBrollAgent:
         ideal_cuts_plan: str,
         *,
         dest: Path,
+        brand_kit_tokens: dict | None = None,
+        creative_direction: str = "",
+        director_guidance: str = "",
     ) -> GeneratedBroll:
         dest.mkdir(parents=True, exist_ok=True)
-        opening = _build_user_message(manifest, brief, platform, ideal_cuts_plan)
+        opening = _build_user_message(
+            manifest, brief, platform, ideal_cuts_plan, brand_kit_tokens,
+            creative_direction=creative_direction,
+            director_guidance=director_guidance,
+        )
         history: list[HistoryItem] = [UserMessage(opening)]
         narration_parts: list[str] = []
         slots: list[GeneratedSlot] = []
@@ -510,14 +517,54 @@ class GenerateBrollAgent:
         return ToolResult(call.id, text=f"unknown tool: {call.name!r}"), None
 
 
+def _load_nanobanana_styles() -> str:
+    """Return a compact style menu from brand-kit/nanobanana_styles.json, or '' if absent."""
+    import json as _json
+    from pathlib import Path as _Path
+    styles_path = _Path(__file__).parent.parent.parent.parent / "brand-kit" / "nanobanana_styles.json"
+    if not styles_path.exists():
+        return ""
+    try:
+        data = _json.loads(styles_path.read_text(encoding="utf-8"))
+        lines = ["## Nano Banana Image Styles (reference by id in your prompts)"]
+        lines.append("Append the style's `prompt` text to your generate_image prompt to activate it.")
+        for cat in data.get("categories", []):
+            lines.append(f"\n### {cat['id']}. {cat['name']}")
+            for s in cat.get("styles", []):
+                lines.append(f"  {s['id']} — **{s['name']}**: {s['description']}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_user_message(
-    manifest: Manifest, brief: str, platform: str, ideal_cuts_plan: str
+    manifest: Manifest,
+    brief: str,
+    platform: str,
+    ideal_cuts_plan: str,
+    brand_kit_tokens: dict | None = None,
+    *,
+    creative_direction: str = "",
+    director_guidance: str = "",
 ) -> str:
+    import json as _json
+
     lines = [
         f"Platform: {platform}",
         f"Video length: {manifest.duration:.2f}s",
         "",
         f"Speaker context / brief: {brief}",
+    ]
+    if creative_direction:
+        lines += ["", "## Creative Direction (use this to inform every asset you generate)", creative_direction]
+    if director_guidance:
+        lines += ["", "## Director's Focus for This Dispatch", director_guidance]
+    if brand_kit_tokens:
+        lines += ["", "## Brand Kit Tokens (style all generated assets to these)", _json.dumps(brand_kit_tokens, indent=2)]
+    nb_styles = _load_nanobanana_styles()
+    if nb_styles:
+        lines += ["", nb_styles]
+    lines += [
         "",
         "## IdealCuts Plan",
         ideal_cuts_plan,

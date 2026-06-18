@@ -12,27 +12,21 @@ from __future__ import annotations
 from typing import cast
 
 from videogen.kernel.composition import Overlay, TitleOverlay
-from videogen.kernel.ir import TextLayer, TextRun, TextStyle, Transform, constant
+from videogen.kernel.ir import TextLayer, TextRun, TextStyle
 from videogen.kernel.registry import CompileContext, OverlayFragment
-
-# Lift the headline up from frame centre into the upper third (fraction of frame height).
-_UPPER_THIRD_TRANSLATE_Y = -0.22
 
 
 def to_ir(overlay: Overlay, ctx: CompileContext) -> OverlayFragment:
-    """Compile a title into one painted text layer -- a large, bold, static headline."""
+    """Compile a title into one painted text layer -- a large, bold, static headline.
+
+    Positioning (upper-third vs center) is handled by Main.tsx which branches on style=="title".
+    """
     title = cast(TitleOverlay, overlay)
     props = TextStyle(font_size=96, font_weight=800, color="#FFFFFF")
-    transform = (
-        Transform(translate_y=constant(_UPPER_THIRD_TRANSLATE_Y))
-        if title.placement == "upper-third"
-        else None
-    )
     layer = TextLayer(
         start=title.start,
         end=title.end,
         z=title.z,
-        transform=transform,
         runs=[TextRun(text=title.text)],
         style="title",
         props=props,

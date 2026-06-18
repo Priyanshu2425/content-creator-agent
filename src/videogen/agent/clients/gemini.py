@@ -51,7 +51,12 @@ def _to_contents(history: Sequence[HistoryItem]) -> list[dict[str, Any]]:
     contents: list[dict[str, Any]] = []
     for item in history:
         if isinstance(item, UserMessage):
-            contents.append({"role": "user", "parts": [{"text": item.text}]})
+            parts: list[dict[str, Any]] = [{"text": item.text}]
+            for img_bytes in item.images:
+                import base64
+                mime = "image/jpeg" if img_bytes[:3] == b"\xff\xd8\xff" else "image/png"
+                parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(img_bytes).decode()}})
+            contents.append({"role": "user", "parts": parts})
         elif isinstance(item, AssistantTurn):
             parts: list[dict[str, Any]] = []
             if item.text:

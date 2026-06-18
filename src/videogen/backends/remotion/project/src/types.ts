@@ -71,7 +71,7 @@ export interface MediaLayer extends LayerBase {
 export interface TextLayer extends LayerBase {
   kind: "text";
   runs: TextRun[];
-  style: string; // provenance only; the component never branches on it
+  style: string; // "title" pins to upper-third; everything else (captions) goes to bottom
   props: TextStyle; // the visual props the component paints from
 }
 

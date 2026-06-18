@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from videogen import log
-from videogen.agent import creation_styles
 from videogen.agent.loop import DirectorLoop
+from videogen.agent.prompts import SYSTEM_PROMPT
 from videogen.agent.model import ModelClient
 from videogen.agent.perception import Manifest
 from videogen.agent.review import ReviewAgent
@@ -74,8 +74,8 @@ class AuthoringService:
     ) -> None:
         self._backend = backend
         self._artifacts_dir = artifacts_dir
-        # The authoring system prompt (a creation style). ``None`` falls back to the active default
-        # style at author time, so the choice lives in ``creation_styles.DEFAULT_STYLE``.
+        # The Director's system prompt. ``None`` falls back to the base ``SYSTEM_PROMPT`` at author
+        # time. (An explicit override can still be injected per construction or per call.)
         self._system = system
 
     def author(
@@ -94,9 +94,9 @@ class AuthoringService:
         brand_kit: Any = None,
         timeline_skeleton: str = "",
     ) -> AuthoredComposition:
-        # Precedence: an explicit call argument, then the service's configured style, then the
-        # active default style (``creation_styles.DEFAULT_STYLE``).
-        system = system or self._system or creation_styles.active()
+        # Precedence: an explicit call argument, then the service's configured prompt, then the
+        # base Director system prompt.
+        system = system or self._system or SYSTEM_PROMPT
         builder = Builder.new(
             voiceover=manifest.voiceover,
             duration=manifest.duration,

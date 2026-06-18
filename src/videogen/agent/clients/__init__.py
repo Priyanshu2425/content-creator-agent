@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from videogen.agent.clients.claude_code import ClaudeCodeClient
     from videogen.agent.clients.gemini import GeminiModelClient
     from videogen.agent.clients.nvidia import NvidiaModelClient
+    from videogen.agent.clients.openrouter import OpenRouterModelClient
     from videogen.agent.clients.perplexity import PerplexityModelClient
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "ClaudeCodeClient",
     "GeminiModelClient",
     "NvidiaModelClient",
+    "OpenRouterModelClient",
     "PerplexityModelClient",
 ]
 
@@ -33,6 +35,7 @@ _MODULES = {
     "ClaudeCodeClient": "claude_code",
     "GeminiModelClient": "gemini",
     "NvidiaModelClient": "nvidia",
+    "OpenRouterModelClient": "openrouter",
     "PerplexityModelClient": "perplexity",
 }
 

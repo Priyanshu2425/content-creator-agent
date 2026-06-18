@@ -48,11 +48,7 @@ def build_genai_client(
     except ModuleNotFoundError as exc:  # surface an actionable hint, not a bare import error
         raise RuntimeError(f"this feature needs the google-genai SDK; {install_hint}") from exc
 
-    if use_vertex_adc():
-        # ADC via Vertex AI: no API key. project/location from env; credentials from ADC.
-        project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-        location = os.environ.get("GOOGLE_CLOUD_LOCATION") or _DEFAULT_LOCATION
-        return genai.Client(vertexai=True, project=project, location=location)
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION") or _DEFAULT_LOCATION
+    return genai.Client(vertexai=True, project=project, location=location)
 
-    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    return genai.Client(api_key=key) if key else genai.Client()

@@ -21,21 +21,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import cast
 
-from pydantic import TypeAdapter
-
 from videogen.agent.model import ToolSpec
 from videogen.kernel.builder import Builder, OpResult, TranscriptLike
 from videogen.kernel.composition import (
     CaptionStyle,
     CropRect,
     LayoutName,
-    Overlay,
     RegionName,
     TransitionKind,
 )
-
-_OVERLAY_TYPES = ("zoom", "pan", "insert")
-_overlay_adapter: TypeAdapter[Overlay] = TypeAdapter(Overlay)
 
 
 def _choices(enum_cls: type[StrEnum]) -> list[str]:
@@ -48,7 +42,6 @@ def _choices(enum_cls: type[StrEnum]) -> list[str]:
 MUTATING_OPS = {
     "add_scene",
     "fill_region",
-    "add_overlay",
     "add_title",
     "add_caption",
     "add_captions_from_transcript",
@@ -61,32 +54,10 @@ FINISH_OP = "finish"
 # Worker-dispatch ops (ADR 0008): the Director runs a specialist worker as a tool. Kept OUT of TOOLS
 # and routed separately -- the loop advertises a dispatch tool only when its worker is wired, and a
 # dispatch draws from a small per-worker dispatch budget rather than the Builder-op budget.
-DISPATCH_OPS = {"dispatch_broll", "dispatch_text_hook", "dispatch_sfx"}
+DISPATCH_OPS = {"dispatch_broll", "dispatch_text_hook", "dispatch_sfx", "dispatch_creative_direction", "dispatch_motion_graphics"}
 # The text-return vision channel for image-blind clients (ADR 0007). Kept OUT of TOOLS and the sets
 # above: the loop swaps it in for VISION_OPS only when the client cannot see and an advisor exists.
 ADVICE_OP = "consult_placement"
-
-
-def build_overlay(args: dict[str, object]) -> Overlay:
-    """Construct the right Overlay subclass from a tool call's flat args.
-
-    The model sends the shared envelope fields (``type``/``start``/``end``/``target``/``z``) plus a
-    type-specific ``params`` object; we flatten them and let the kernel's discriminated union pick
-    and validate the subclass (zoom/pan/insert), so overlay construction reuses the contract types
-    rather than re-deriving them here.
-    """
-    params = cast(dict[str, object], args.get("params") or {})
-    payload: dict[str, object] = {
-        "type": args["type"],
-        "start": args["start"],
-        "end": args["end"],
-        **params,
-    }
-    if "target" in args:
-        payload["target"] = args["target"]
-    if "z" in args:
-        payload["z"] = args["z"]
-    return _overlay_adapter.validate_python(payload)
 
 
 def apply_op(
@@ -118,8 +89,6 @@ def apply_op(
             cast(str, args["asset_id"]),
             in_point=cast("float | None", args.get("in_point")),
         )
-    if name == "add_overlay":
-        return builder.add_overlay(build_overlay(args))
     if name == "add_title":
         return builder.add_title(
             cast(str, args["text"]),
@@ -217,31 +186,6 @@ TOOLS: list[ToolSpec] = [
                 "in_point": _number("optional source in-point, seconds"),
             },
             "required": ["scene_id", "region", "asset_id"],
-        },
-    ),
-    ToolSpec(
-        name="add_overlay",
-        description=(
-            "Add an effect overlay. zoom/pan are transforms on a base region; insert is floating "
-            "b-roll (its params carry asset/anchor/scale). target defaults to the full frame."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": list(_OVERLAY_TYPES)},
-                "start": _number("overlay start, seconds"),
-                "end": _number("overlay end, seconds"),
-                "target": {"type": "string", "enum": _choices(RegionName)},
-                "z": {"type": "integer", "description": "paint order; higher sits on top"},
-                "params": {
-                    "type": "object",
-                    "description": (
-                        "type-specific: zoom {from_scale,to_scale}; pan {dx,dy}; "
-                        "insert {asset,anchor,scale,in_point,fade}"
-                    ),
-                },
-            },
-            "required": ["type", "start", "end"],
         },
     ),
     ToolSpec(
@@ -397,7 +341,7 @@ DISPATCH_BROLL_TOOL = ToolSpec(
         "standalone b-roll assets (generated stills + animated stat-viz clips) styled to the brand "
         "kit, and returns a shot-list proposal naming each new asset id and what it depicts. The "
         "new assets are registered into the library for you; you then place them yourself with "
-        "fill_region/add_overlay. Costs one dispatch from a small budget -- call it once when you "
+        "fill_region. Costs one dispatch from a small budget -- call it once when you "
         "know the video needs b-roll, not per shot, and skip it entirely if it does not."
     ),
     input_schema={
@@ -451,11 +395,60 @@ DISPATCH_SFX_TOOL = ToolSpec(
     },
 )
 
+DISPATCH_CREATIVE_DIRECTION_TOOL = ToolSpec(
+    name="dispatch_creative_direction",
+    description=(
+        "Dispatch the Creative Director agent to generate high-level creative direction before "
+        "you start placing anything. It analyzes the brief, transcript, and brand kit to produce: "
+        "a concrete visual hook strategy, B-roll metaphors ('show, don't tell'), pacing notes, "
+        "and a CTA recommendation. Call it EARLY — ideally as your first op — so its direction "
+        "shapes the whole edit. Costs one dispatch; skip only if the brief already gives exhaustive "
+        "visual direction."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "guidance": {
+                "type": "string",
+                "description": "optional: specific aspect to focus on, e.g. 'emotional tone' or 'hook optimization'",
+            }
+        },
+        "required": [],
+    },
+)
+
+
+DISPATCH_MOTION_GRAPHICS_TOOL = ToolSpec(
+    name="dispatch_motion_graphics",
+    description=(
+        "Dispatch the Motion Graphics Agent to produce text-based animated clips via Remotion. "
+        "Use this for: animated headline/stat cards, lower-third name bars, CTA closing panels, "
+        "and word-by-word kinetic text reveals. These are pixel-perfect to the brand kit and render "
+        "as .mp4 clips you place with fill_region — exactly like b-roll assets. "
+        "Call it INSTEAD OF dispatch_broll when the content is text-driven (a claim, a stat in "
+        "context, a speaker intro, a CTA). Call it AFTER dispatch_creative_direction so the "
+        "motion style matches the creative direction. Costs one dispatch."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "guidance": {
+                "type": "string",
+                "description": "optional focus: which moments need motion-graphic support and what tone",
+            }
+        },
+        "required": [],
+    },
+)
+
+
 # Maps each dispatch op to the tool the loop advertises when that worker is wired (ADR 0008).
 DISPATCH_TOOLS: dict[str, ToolSpec] = {
     "dispatch_broll": DISPATCH_BROLL_TOOL,
     "dispatch_text_hook": DISPATCH_TEXT_HOOK_TOOL,
     "dispatch_sfx": DISPATCH_SFX_TOOL,
+    "dispatch_creative_direction": DISPATCH_CREATIVE_DIRECTION_TOOL,
+    "dispatch_motion_graphics": DISPATCH_MOTION_GRAPHICS_TOOL,
 }
 
 

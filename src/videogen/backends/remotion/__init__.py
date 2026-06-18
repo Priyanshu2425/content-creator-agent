@@ -17,6 +17,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +58,10 @@ class RemotionBackend:
         assets -- the stat-viz compositions carry no external media references. Props are serialized
         directly as JSON and passed via --props.
         """
-        out_path = Path(out_path)
+        # Resolve to absolute: the subprocess runs with cwd=project_dir, so a relative out_path
+        # (the pipeline's run dir is relative) would make remotion write under the project dir while
+        # this check looks elsewhere -- the file renders but reads as "produced no file".
+        out_path = Path(out_path).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as tmp:
             props_file = Path(tmp) / "props.json"
@@ -85,9 +89,48 @@ class RemotionBackend:
             )
         return out_path
 
+    def render_generated_clip(self, tsx_code: str, out_path: Path) -> Path:
+        """Write LLM-generated TSX to a temp file and render it as a standalone Remotion composition.
+
+        The TSX must export `RemotionRoot` and register a composition with id
+        "GeneratedMotionGraphic". Python writes the file into the Remotion project's src/
+        directory, runs `npx remotion render`, then removes the temp file.
+        """
+        out_path = Path(out_path).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_name = f"_mg_gen_{uuid.uuid4().hex[:10]}.tsx"
+        tmp_tsx = self.project_dir / "src" / tmp_name
+        try:
+            tmp_tsx.write_text(tsx_code, encoding="utf-8")
+            entry = f"src/{tmp_name}"
+            argv = [
+                "npx", "remotion", "render",
+                entry,
+                "GeneratedMotionGraphic",
+                str(out_path),
+            ]
+            result = subprocess.run(argv, cwd=self.project_dir, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"remotion render (generated) failed (exit {result.returncode}).\n"
+                    f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+                )
+        finally:
+            if tmp_tsx.exists():
+                tmp_tsx.unlink()
+
+        if not out_path.exists():
+            raise RuntimeError(
+                f"remotion render (generated) exited 0 but produced no file at {out_path}"
+            )
+        return out_path
+
     # --- internals ---
 
     def _invoke(self, command: str, ir: IR, out_path: Path, *, extra: list[str]) -> Path:
+        # Absolute, so the cwd=project_dir subprocess writes where this check looks (see render_clip).
+        out_path = Path(out_path).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as tmp:
             public = Path(tmp) / "public"

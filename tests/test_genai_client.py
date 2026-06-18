@@ -44,10 +44,13 @@ def test_adc_mode_defaults_location_when_unset(monkeypatch: pytest.MonkeyPatch) 
     assert client.kwargs["location"] == "us-central1"
 
 
-def test_api_key_mode_when_vertex_not_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_is_vertex_only_and_ignores_any_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # build_genai_client is Vertex/ADC-only: a supplied or env API key is ignored.
     monkeypatch.setenv("GEMINI_API_KEY", "secret")
-    client = gc.build_genai_client()
-    assert client.kwargs == {"api_key": "secret"}
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "p")
+    client = gc.build_genai_client(api_key="also-ignored")
+    assert client.kwargs.get("vertexai") is True
+    assert "api_key" not in client.kwargs
 
 
 def test_have_gemini_credentials_reflects_either_path(monkeypatch: pytest.MonkeyPatch) -> None:

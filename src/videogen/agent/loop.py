@@ -40,7 +40,7 @@ from videogen.agent.model import (
 )
 from videogen.agent.perception import Manifest, assemble_perception
 from videogen.agent.prompts import SYSTEM_PROMPT
-from videogen.agent.dispatch import WorkerDispatcher
+from videogen.agent.dispatch import Scratchpad, WorkerDispatcher
 from videogen.agent.tools import (
     ADVICE_OP,
     CONSULT_PLACEMENT_TOOL,
@@ -112,7 +112,13 @@ class DirectorLoop:
         self._brand_kit = brand_kit
         self._max_dispatch_per_worker = max_dispatch_per_worker
         self._dispatch_counts: dict[str, int] = {}
+        scratchpad_path = (artifacts_dir / "scratchpad.log") if artifacts_dir is not None else None
+        self._scratchpad = Scratchpad(log_path=scratchpad_path)
+        self._last_director_text: str = ""
         self._timeline_skeleton = timeline_skeleton
+        # Full Director transcript (system prompt, every assistant message + tool call, every tool
+        # result), appended to one file across the initial author and all finalization rounds.
+        self._chat_path = (artifacts_dir / "director_chat.log") if artifacts_dir is not None else None
 
     def run(self) -> DirectorResult:
         history: list[HistoryItem] = [UserMessage(self._opening_message())]
@@ -122,8 +128,10 @@ class DirectorLoop:
         log.get().agent_start(self._max_ops)
 
         model = getattr(self._client, "model", "unknown") or "unknown"
+        self._chat_header(model)
+        self._chat_block("USER (opening)", history[0].text)  # type: ignore[union-attr]
         turn = 0
-        while ops_used < self._max_ops:
+        while True:
             turn += 1
             # The last history item is the user/tool message the model is responding to.
             last_user_text = _last_user_text(history)
@@ -141,27 +149,32 @@ class DirectorLoop:
                 tool_calls=[tc.name for tc in assistant.tool_calls],
             )
             history.append(assistant)
+            self._chat_assistant(turn, assistant)
             log.get().agent_narration(assistant.text)
+            # Track the Director's latest reasoning for the shared scratchpad.
+            if assistant.text:
+                self._last_director_text = assistant.text
             if not assistant.tool_calls:
                 break  # the model stopped acting without finishing
 
             results: list[ToolResult] = []
             for tool_call in assistant.tool_calls:
-                # Worker dispatches (ADR 0008) draw from a separate per-worker budget, so they do
-                # NOT consume the Builder-op budget that bounds authoring cost.
                 if tool_call.name not in DISPATCH_OPS:
                     ops_used += 1
                 log.get().agent_tool_call(tool_call.name, dict(tool_call.args))
                 result, finished = self._dispatch(tool_call)
                 results.append(result)
+                self._chat_result(tool_call, result)
                 if finished:
                     terminated_clean = True
-                if ops_used >= self._max_ops:
-                    break
             history.append(ToolResultsMessage(tuple(results)))
             if terminated_clean:
                 break
 
+        self._chat_block(
+            "DIRECTOR RUN DONE",
+            f"ops_used={ops_used}  terminated_clean={terminated_clean}",
+        )
         log.get().agent_done(ops_used, terminated_clean)
         return DirectorResult(
             composition=self._builder.composition,
@@ -178,8 +191,10 @@ class DirectorLoop:
         text-return ``consult_placement`` advisor tool in their place (ADR 0007). Otherwise (a
         sighted client, or no advisor) the full ``TOOLS`` list is used unchanged."""
         blind = not getattr(self._client, "consumes_images", True)
-        if blind and self._advisor is not None and self._backend is not None:
-            tools = [t for t in TOOLS if t.name not in VISION_OPS] + [CONSULT_PLACEMENT_TOOL]
+        if blind:
+            # Blind client: drop image vision tools entirely. consult_placement is also disabled
+            # for now — director authors by text only.
+            tools = [t for t in TOOLS if t.name not in VISION_OPS]
         else:
             tools = list(TOOLS)
         # Advertise each dispatch tool only when its worker is wired (ADR 0008).
@@ -192,6 +207,49 @@ class DirectorLoop:
         perception = assemble_perception(self._builder.composition, self._manifest)
         skeleton = f"\n\n{self._timeline_skeleton}" if self._timeline_skeleton else ""
         return f"Brief:\n{self._brief}{skeleton}\n\n{perception}"
+
+    # --- Director chat transcript (full conversation to a per-run log) --------------------------
+
+    def _chat(self, text: str) -> None:
+        """Append a line to the Director chat log. Logging never breaks a run."""
+        if self._chat_path is None:
+            return
+        try:
+            self._chat_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._chat_path.open("a", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        except OSError:
+            pass
+
+    def _chat_header(self, model: str) -> None:
+        self._chat("\n" + "=" * 88)
+        self._chat(
+            f"DIRECTOR RUN  model={model}  max_ops={self._max_ops}  "
+            f"workers={sorted(self._dispatchers)}"
+        )
+        self._chat("=" * 88)
+        self._chat("\n---- SYSTEM PROMPT ----\n" + self._system)
+
+    def _chat_block(self, label: str, text: str) -> None:
+        self._chat(f"\n---- {label} ----\n{text}")
+
+    def _chat_assistant(self, turn: int, assistant: object) -> None:
+        self._chat(f"\n{'=' * 28} TURN {turn} - ASSISTANT {'=' * 28}")
+        text = getattr(assistant, "text", None)
+        if text:
+            self._chat(text)
+        for call in getattr(assistant, "tool_calls", ()):
+            try:
+                import json as _json
+
+                args = _json.dumps(dict(call.args), default=str)
+            except Exception:
+                args = str(getattr(call, "args", ""))
+            self._chat(f"  -> tool_call [{call.name}] {args}")
+
+    def _chat_result(self, call: ToolCall, result: ToolResult) -> None:
+        imgs = f"  [+{len(result.images)} image(s)]" if getattr(result, "images", None) else ""
+        self._chat(f"\n  <- tool_result [{call.name}]{imgs}\n{result.text or ''}")
 
     def _dispatch(self, call: ToolCall) -> tuple[ToolResult, bool]:
         if call.name in MUTATING_OPS:
@@ -227,9 +285,15 @@ class DirectorLoop:
             )
         self._dispatch_counts[call.name] = used + 1
 
+        # Write the Director's current reasoning to the shared scratchpad before the worker runs so
+        # the worker sees why the Director is dispatching it.
+        if self._last_director_text:
+            self._scratchpad.write("director", self._last_director_text)
+
         guidance: dict[str, object] = {
             "guidance": str(call.args.get("guidance", "")),
             "brand_kit": self._brand_kit_tokens(),
+            "scratchpad": self._scratchpad.read_all(),
         }
         # The Director owns the event timeline (ADR 0009): build it from the live composition and
         # hand it to the SFX worker rather than have the worker re-derive it.
@@ -246,6 +310,10 @@ class DirectorLoop:
 
         registered, failed = self._register_assets(proposal.new_assets)
         sfx_applied = self._apply_scene_audio(proposal.scene_audio)
+        # Record the worker's proposal in the shared scratchpad so later workers and the Director
+        # can see what this worker found.
+        if proposal.proposal_text:
+            self._scratchpad.write(call.name, proposal.proposal_text)
         self._store.note(self._doc_id, op=call.name)
         log.get().agent_tool_ok(call.name)
         text = proposal.proposal_text

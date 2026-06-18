@@ -62,7 +62,6 @@ def pipeline_trace(
     brief: str,
     platform: str,
     host: str,
-    creation_style: str = "classic",
 ) -> Generator[Any, None, None]:
     """Root Langfuse trace for a full videogen pipeline run.
 
@@ -79,7 +78,7 @@ def pipeline_trace(
         input={"brief": brief, "platform": platform},
     ) as trace:
         with _propagate_attributes(
-            tags=[platform, creation_style],
+            tags=[platform],
             metadata={"host_filename": os.path.basename(host)},
         ):
             yield trace

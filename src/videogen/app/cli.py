@@ -53,6 +53,7 @@ _AUTHORING_CLIENTS = {
     "gemini": "GeminiModelClient",
     "anthropic": "AnthropicModelClient",
     "nvidia": "NvidiaModelClient",
+    "openrouter": "OpenRouterModelClient",
     "perplexity": "PerplexityModelClient",
 }
 
@@ -147,7 +148,6 @@ class Pipeline:
             brief=brief,
             platform=self.platform,
             host=host,
-            creation_style=getattr(self.authoring, "_system", "classic") or "classic",
         ):
             return self._run(host=host, broll=broll, brief=brief)
 
@@ -171,6 +171,20 @@ class Pipeline:
         # and hand it to the Director, which authors the cuts itself.
         with _stage("timeline-skeleton"):
             skeleton = build_skeleton(transcript=transcript, duration=host_facts.duration)
+
+        # Resolve the run's brand kit up front: workers (motion graphics) and the author step both
+        # receive it, so it must exist before the dispatchers are built.
+        run_brand_kit = self.brand_kit
+        if run_brand_kit is not None:
+            from videogen.agent.brand_kit import FrameMeta
+
+            run_brand_kit = run_brand_kit.with_frame(
+                FrameMeta.of(
+                    width=int(host_facts.width or 0),
+                    height=int(host_facts.height or 0),
+                    fps=int(host_facts.fps),
+                )
+            )
 
         # B-roll generation is now an in-loop worker the Director dispatches on demand (ADR 0008),
         # not a fixed upstream stage. Build the dispatcher here (it binds media ingest + the worker
@@ -196,6 +210,24 @@ class Pipeline:
             model_client=self.model_client, transcript_text=transcript.text
         )
 
+        # The creative direction worker needs only the brief + transcript + a model.
+        dispatchers["dispatch_creative_direction"] = _make_creative_direction_dispatcher(
+            brief=brief,
+            transcript_text=transcript.text,
+        )
+
+        # Motion graphics — always available; uses same Remotion backend as stat viz.
+        if not self.authoring_only and self.generated_broll_dir is not None:
+            dispatchers["dispatch_motion_graphics"] = _make_motion_graphics_dispatcher(
+                media=self.media,
+                model_client=self.model_client,
+                manifest=manifest,
+                brief=brief,
+                transcript_text=transcript.text,
+                dest=self.generated_broll_dir,
+                brand_kit=run_brand_kit,
+            )
+
         if self.authoring_only or self.describer is not None:
             if self.describer is None:
                 raise RuntimeError("describe-assets required but no describer is configured")
@@ -214,18 +246,6 @@ class Pipeline:
                     fps=host_facts.fps,
                     transcript=transcript,
                 )
-
-        run_brand_kit = self.brand_kit
-        if run_brand_kit is not None:
-            from videogen.agent.brand_kit import FrameMeta
-
-            run_brand_kit = run_brand_kit.with_frame(
-                FrameMeta.of(
-                    width=int(host_facts.width or 0),
-                    height=int(host_facts.height or 0),
-                    fps=int(host_facts.fps),
-                )
-            )
 
         with _stage("author"):
             authored = self.authoring.author(
@@ -342,7 +362,13 @@ def _make_broll_dispatcher(
     from videogen.agent.dispatch import NewAsset, WorkerProposal
 
     def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
-        generated = agent.run(manifest, brief, platform, ideal_cuts_plan, dest=dest)
+        scratchpad = str(guidance.get("scratchpad", ""))
+        generated = agent.run(
+            manifest, brief, platform, ideal_cuts_plan, dest=dest,
+            brand_kit_tokens=guidance.get("brand_kit"),  # type: ignore[arg-type]
+            creative_direction=scratchpad,
+            director_guidance=str(guidance.get("guidance", "")),
+        )
         new_assets: list[NewAsset] = []
         lines: list[str] = []
         for slot in generated.slots:
@@ -380,6 +406,97 @@ def _make_text_hook_dispatcher(*, model_client: ModelClient, transcript_text: st
             brand_kit=guidance.get("brand_kit"),
         )
         return WorkerProposal(proposal_text=proposal.to_text(), new_assets=())
+
+    return dispatch
+
+
+def _make_creative_direction_dispatcher(
+    *, brief: str, transcript_text: str
+) -> Any:
+    """Build the creative direction worker dispatcher (ADR 0008).
+
+    When the Director calls ``dispatch_creative_direction``, this runs the CreativeDirectionAgent
+    over the brief + transcript (plus the Director's scratchpad context and brand-kit tokens) and
+    returns its structured creative direction as a proposal. It produces no assets — the Director
+    uses the direction to guide its authoring decisions.
+
+    Always uses Gemini (vision-capable) so brand-kit reference images are visible.
+    """
+    from videogen.agent.dispatch import WorkerProposal
+    from videogen.agent.creative_direction import CreativeDirectionAgent
+    from videogen.agent.clients.gemini import GeminiModelClient
+
+    agent = CreativeDirectionAgent(GeminiModelClient(model="gemini-2.5-flash"))
+
+    def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
+        proposal = agent.generate(
+            brief=brief,
+            transcript=transcript_text,
+            brand_kit=guidance.get("brand_kit"),  # type: ignore[arg-type]
+            scratchpad=str(guidance.get("scratchpad", "")),
+            guidance=str(guidance.get("guidance", "")),
+        )
+        return WorkerProposal(proposal_text=proposal, new_assets=())
+
+    return dispatch
+
+
+def _make_motion_graphics_dispatcher(
+    *,
+    media: MediaPort,
+    model_client: ModelClient,
+    manifest: MediaManifest,
+    brief: str,
+    transcript_text: str,
+    dest: Path,
+    brand_kit: Any | None,
+) -> Any:
+    """Build the motion-graphics worker dispatcher (ADR 0008).
+
+    When the Director calls ``dispatch_motion_graphics``, this runs the MotionGraphicsAgent
+    to produce animated text clips (title cards, lower-thirds, CTA, kinetic text) via Remotion.
+    Each clip is ingested as an asset and returned as a new-asset proposal, just like b-roll.
+    """
+    from videogen.agent.dispatch import NewAsset, WorkerProposal
+    from videogen.agent.motion_graphics import MotionGraphicsAgent
+    from videogen.agent.clients.gemini import GeminiModelClient
+    from videogen.agent.creative_direction import _IMAGE_SUFFIXES as _MG_IMG_SUFFIXES, _BRAND_KIT_DIR as _MG_BK_DIR
+
+    bk_imgs: tuple[bytes, ...] = ()
+    if _MG_BK_DIR.exists():
+        bk_imgs = tuple(
+            f.read_bytes() for f in sorted(_MG_BK_DIR.iterdir())
+            if f.suffix.lower() in _MG_IMG_SUFFIXES
+        )
+
+    agent = MotionGraphicsAgent(GeminiModelClient(model="gemini-2.5-flash"))
+
+    def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
+        scratchpad = str(guidance.get("scratchpad", ""))
+        result = agent.run(
+            brief=brief,
+            transcript=transcript_text,
+            creative_direction=scratchpad,
+            director_guidance=str(guidance.get("guidance", "")),
+            brand_kit=guidance.get("brand_kit"),  # type: ignore[arg-type]
+            brand_kit_images=bk_imgs,
+            dest=dest,
+            fps=int(manifest.fps),
+        )
+        new_assets: list[NewAsset] = []
+        lines: list[str] = []
+        for slot in result.slots:
+            asset_id = media.ingest(str(slot.path))
+            kind = _asset_type(str(slot.path))
+            asset = Asset(type=AssetType(kind.value), src=str(media.resolve(asset_id)))
+            new_assets.append(NewAsset(asset_id=asset_id, asset=asset, description=slot.label))
+            lines.append(f"- {asset_id} ({slot.duration_s}s): {slot.label}")
+        text = (
+            "Motion Graphics Agent produced these animated clips (brand-kit styled):\n" + "\n".join(lines)
+            if lines
+            else "Motion Graphics Agent produced no clips."
+        )
+        return WorkerProposal(proposal_text=text, new_assets=tuple(new_assets))
 
     return dispatch
 
@@ -561,7 +678,6 @@ def build_default_pipeline(
     When ``authoring_only`` is true, IdealCuts and GenerateBroll are omitted and the Gemini
     describer is always wired (requires API keys in the environment).
     """
-    from videogen.agent import creation_styles
     from videogen.agent.gemini_vision import GeminiVisionAdvisor
     from videogen.backends.remotion import RemotionBackend
     from videogen.services.authoring import AuthoringService
@@ -596,7 +712,15 @@ def build_default_pipeline(
         from videogen.agent.stat_viz import StatVizRenderer
         from videogen.creation.nano_banana import NanoBananaCreator
 
-        creator = NanoBananaCreator(model=settings.broll_image_model)
+        from videogen.agent.creative_direction import _IMAGE_SUFFIXES, _BRAND_KIT_DIR
+        bk_images: tuple[bytes, ...] = ()
+        if _BRAND_KIT_DIR.exists():
+            bk_images = tuple(
+                f.read_bytes()
+                for f in sorted(_BRAND_KIT_DIR.iterdir())
+                if f.suffix.lower() in _IMAGE_SUFFIXES
+            )
+        creator = NanoBananaCreator(model=settings.broll_image_model, reference_images=bk_images)
         # IdealCuts is folded into the Director (ADR 0008); no standalone cut-planner is wired.
         generate_broll_agent = GenerateBrollAgent(
             model_client,
@@ -615,7 +739,6 @@ def build_default_pipeline(
         authoring=AuthoringService(
             backend=backend,
             artifacts_dir=run_dir,
-            system=creation_styles.get_style(settings.creation_style),
         ),
         renderer=renderer,
         model_client=model_client,
@@ -643,7 +766,7 @@ def _build_reviewer(settings: Settings) -> ReviewAgent:
         return GeminiReviewAgent(model=settings.reviewer_model)
     from videogen.agent.claude_review import ClaudeReviewAgent
 
-    return ClaudeReviewAgent(model=settings.authoring_model or "claude-sonnet-4-6")
+    return ClaudeReviewAgent(model="claude-opus-4-8")
 
 
 def _build_authoring_client(settings: Settings) -> ModelClient:
@@ -652,7 +775,6 @@ def _build_authoring_client(settings: Settings) -> ModelClient:
     ``authoring_model = null`` keeps the client's own default model. Lazy import keeps the provider
     SDKs off the CLI's import path until a real run picks a client."""
     from videogen.agent import clients
-
     attr = _AUTHORING_CLIENTS.get(settings.authoring_client)
     if attr is None:
         known = ", ".join(sorted(_AUTHORING_CLIENTS))

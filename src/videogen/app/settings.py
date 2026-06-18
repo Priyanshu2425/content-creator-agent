@@ -33,9 +33,6 @@ class Settings(BaseModel):
     # The model id for that client. ``null`` keeps the client's own default (e.g. claude-code ->
     # claude-sonnet-4-6; claude-code with null also follows the CLI's configured model).
     authoring_model: str | None = None
-    # The creation style (system prompt) to author under. Known names are the keys of
-    # ``creation_styles.STYLES`` (classic, split-broll).
-    creation_style: str = "classic"
     # Which reviewer runs the finalization gate: "claude" reads the final Composition JSON via Claude
     # Code (structural/editorial review, the default); "gemini" watches the rendered mp4 for motion
     # issues. Gemini stays available -- this only chooses the default.

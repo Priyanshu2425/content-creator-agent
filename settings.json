@@ -1,7 +1,6 @@
 {
-  "authoring_client": "claude-code",
-  "authoring_model": null,
-  "creation_style": "split-broll",
+  "authoring_client": "openrouter",
+  "authoring_model": "deepseek/deepseek-v4-flash",
   "reviewer_model": "gemini-2.5-flash-lite",
   "advisor_model": "gemini-2.5-flash",
   "max_review_rounds": 2,

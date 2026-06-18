@@ -1,0 +1,969 @@
+{
+  "source": "awesome-nanobanana-pro by ZeroLu (CC BY 4.0)",
+  "categories": [
+    {
+      "id": "1",
+      "name": "Photorealism & Aesthetics",
+      "styles": [
+        {
+          "id": "1.1",
+          "name": "Hyper-Realistic Crowd Composition",
+          "description": "Ultra-sharp editorial group photo of celebrities with cinematic lighting and 8K detail",
+          "prompt": "Create a hyper-realistic, ultra-sharp, full-color large-format image featuring a massive group of celebrities from different eras, all standing together in a single wide cinematic frame. The image must look like a perfectly photographed editorial cover with impeccable lighting, lifelike skin texture, micro-details of hair, pores, reflections, and fabric fibers.\n\nGENERAL STYLE & MOOD: Photorealistic, 8k, shallow depth of field, soft natural fill light + strong golden rim light. High dynamic range, calibrated color grading. Skin tones perfectly accurate. Crisp fabric detail with individual threads visible. Balanced composition, slightly wide-angle lens (35mm), center-weighted. All celebrities interacting naturally, smiling, posing, or conversing. Minimal background noise, but with enough world-building to feel real.\n\nTHE ENVIRONMENT: A luxurious open-air rooftop terrace at sunset overlooking a modern city skyline.",
+          "tags": [
+            "photorealism",
+            "crowd",
+            "celebrity",
+            "editorial",
+            "8k"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "1.2",
+          "name": "2000s Mirror Selfie",
+          "description": "Authentic early-2000s digital camera mirror selfie with nostalgic bedroom backdrop via structured JSON prompt",
+          "prompt": "{\"subject\": {\"description\": \"A young woman taking a mirror selfie with very long voluminous dark waves and soft wispy bangs\", \"hair\": {\"color\": \"dark\", \"style\": \"very long, voluminous waves with soft wispy bangs\"}, \"clothing\": {\"top\": {\"type\": \"fitted cropped t-shirt\", \"color\": \"cream white\", \"details\": \"features a large cute anime-style cat face graphic\"}}, \"face\": {\"makeup\": \"natural glam makeup with soft pink dewy blush and glossy red pouty lips\"}}, \"accessories\": {\"earrings\": {\"type\": \"gold geometric hoop earrings\"}, \"device\": {\"type\": \"smartphone\", \"details\": \"patterned case\"}}, \"photography\": {\"camera_style\": \"early-2000s digital camera aesthetic\", \"lighting\": \"harsh super-flash with bright blown-out highlights\", \"angle\": \"mirror selfie\", \"texture\": \"subtle grain, retro highlights, V6 realism\"}, \"background\": {\"setting\": \"nostalgic early-2000s bedroom\", \"elements\": [\"chunky wooden dresser\", \"CD player\", \"posters of 2000s pop icons\", \"hanging beaded door curtain\", \"cluttered vanity with lip glosses\"]}}",
+          "tags": [
+            "2000s",
+            "nostalgia",
+            "mirror-selfie",
+            "flash-photography",
+            "portrait"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "1.3",
+          "name": "Victoria's Secret Style Photoshoot",
+          "description": "High-glamour backstage fashion shoot with corset, feather wings, and flash photography preserving reference face",
+          "prompt": "Create a glamorous photoshoot in the style of Victoria's Secret. A young woman (keep the face 100% accurate from the reference image) stands almost sideways during final preparation for the show. Makeup artists apply lipstick to her (only her hands visible in frame). She wears a corset decorated with beaded embroidery and crystals with a short fluffy skirt, plus large feather wings. The image has a backstage effect. Background: darkly lit room, probably under the podium. Main emphasis on the girl's face and costume details. Flash from the camera emphasizes shine of beads and crystals. Victoria's Secret style: sensuality, luxury, glamour. Very detailed. Important: do not change the face.",
+          "tags": [
+            "fashion",
+            "glamour",
+            "backstage",
+            "portrait",
+            "flash"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.4",
+          "name": "1990s Camera Style Portrait",
+          "description": "Nostalgic 35mm flash portrait of a woman in a cozy bedroom with magazine poster wallpaper",
+          "prompt": "Without changing her original face, create a portrait of a beautiful young woman with porcelain-white skin, captured with a 1990s-style camera using a direct front flash. Her messy dark brown hair is tied up, posing with a calm yet playful smile. She wears a modern oversized cream sweater. The background is a dark white wall covered with aesthetic magazine posters and stickers, evoking a cozy bedroom atmosphere under dim lighting. The 35mm lens flash creates a nostalgic glow.",
+          "tags": [
+            "1990s",
+            "film",
+            "flash",
+            "portrait",
+            "nostalgia"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.5",
+          "name": "One-Click Business Photo (Silicon Valley Style)",
+          "description": "Ultra-realistic 8K professional headshot in navy suit with three-point studio lighting on dark gray backdrop",
+          "prompt": "Keep the facial features of the person in the uploaded image exactly consistent. Dress them in a professional navy blue business suit with a white shirt. Background: Place subject against a clean, solid dark gray studio photography backdrop with subtle gradient. Photography Style: Shot on a Sony A7III with an 85mm f/1.4 lens. Lighting: Use a classic three-point lighting setup. The main key light creates soft defining shadows. A subtle rim light separates the subject from the background. Crucial Details: Render natural skin texture with visible pores. Add natural catchlights to the eyes. Fabric of the suit should show subtle wool texture. Final image: ultra-realistic, 8k professional headshot.",
+          "tags": [
+            "headshot",
+            "business",
+            "professional",
+            "studio",
+            "portrait"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.6",
+          "name": "Emotional Film Photography",
+          "description": "Cinematic Kodak Portra 400 portrait at golden hour with coffee, film grain, and bokeh city lights",
+          "prompt": "Keep the facial features of the person in the uploaded image exactly consistent. Style: A cinematic, emotional portrait shot on Kodak Portra 400 film. Setting: An urban street coffee shop window at Golden Hour (sunset). Warm, nostalgic lighting hitting the side of the face. Atmosphere: Apply a subtle film grain and soft focus to create a dreamy, storytelling vibe. Action: Subject is looking slightly away from the camera, holding a coffee cup, with a relaxed candid expression. Details: High quality, depth of field, bokeh background of city lights.",
+          "tags": [
+            "film",
+            "cinematic",
+            "golden-hour",
+            "portrait",
+            "nostalgia"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.7",
+          "name": "Professional Headshot Creator",
+          "description": "Polished studio headshot from a selfie with 85mm lens, charcoal blazer, and clean color grading",
+          "prompt": "A professional, high-resolution profile photo, maintaining the exact facial structure, identity, and key features of the person in the input image. The subject is framed from the chest up, with ample headroom. The person looks directly at the camera. They are styled for a professional photo studio shoot, wearing a premium smart casual blazer in a subtle charcoal gray. Background: solid neutral studio color. Shot from a high angle with bright and airy soft diffused studio lighting. Captured on an 85mm f/1.8 lens with shallow depth of field, exquisite focus on the eyes, beautiful soft bokeh. Observe crisp detail on the fabric texture of the blazer, individual strands of hair, and natural realistic skin texture. Clean and bright cinematic color grading with subtle warmth and balanced tones.",
+          "tags": [
+            "headshot",
+            "professional",
+            "studio",
+            "portrait",
+            "bokeh"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.8",
+          "name": "Hyperrealistic Anime Portrait in Spotlight",
+          "description": "Dark, moody anime-style portrait with a narrow spotlight cutting through a black background",
+          "prompt": "Generate a hyperrealistic realistic-anime portrait of a female character standing in a completely black background. Lighting: use a narrow beam spotlight focused only on the center of the face. The edges of the light must be sharp and dramatic. All areas outside the spotlight should fall quickly into deep darkness (high falloff shadow), almost blending into the black background. Not soft lighting. Hair: long dark hair with some strands falling over the face. The lower parts of the hair should fade into the shadows. Pose: one hand raised gently to the lips in a shy hesitant gesture. Eyes looking directly at the camera with a mysterious mood. Clothing: black long-sleeve knit sweater; the sweater and body should mostly disappear into the darkness. Overall tone: dark, moody, dramatic, mysterious. High-contrast only in the lit portion of the face. Everything outside the spotlight should be nearly invisible.",
+          "tags": [
+            "anime",
+            "hyperrealistic",
+            "dramatic",
+            "spotlight",
+            "portrait"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "1.9",
+          "name": "Bathroom Mirror Selfie",
+          "description": "Candid iPhone-quality bathroom mirror selfie with natural NYC apartment setting and casual athletic outfit",
+          "prompt": "{\"subject\": {\"description\": \"Young woman taking bathroom mirror selfie, innocent doe eyes but the outfit tells another story\", \"age\": \"early 20s\", \"expression\": {\"eyes\": \"big innocent doe eyes looking up through lashes\", \"mouth\": \"soft pout, lips slightly parted\", \"overall\": \"angel face but devil body\"}, \"hair\": {\"color\": \"platinum blonde\", \"style\": \"messy bun or claw clip, loose strands framing face\"}, \"clothing\": {\"top\": {\"type\": \"ULTRA mini crop tee\", \"color\": \"yellow\", \"graphic\": \"single BANANA logo/graphic\", \"fit\": \"barely containing chest\"}, \"bottom\": {\"type\": \"tight tennis skort or athletic booty shorts\", \"color\": \"white\", \"material\": \"thin stretchy athletic fabric\"}}}, \"photography\": {\"camera_style\": \"casual iPhone mirror selfie, NOT professional\", \"angle\": \"eye-level, straight on mirror\", \"shot_type\": \"3/4 body, close to mirror\", \"aspect_ratio\": \"9:16 vertical\"}, \"background\": {\"setting\": \"regular apartment bathroom\", \"style\": \"normal NYC apartment bathroom\", \"elements\": [\"white subway tile walls\", \"basic bathroom mirror\", \"simple white sink vanity\", \"toiletries visible\", \"small plant on counter\"]}}",
+          "tags": [
+            "mirror-selfie",
+            "candid",
+            "iphone",
+            "social-media",
+            "portrait"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "1.10",
+          "name": "Chalkboard Anime Art Documentation",
+          "description": "Photorealistic classroom documentary shot of a detailed anime chalk drawing on a green school chalkboard",
+          "prompt": "Photorealistic documentation of a specific chalkboard art piece featuring a single anime character. A centered medium shot focusing on the chalkboard mural including the teacher desk. Subject: A large-scale, intricate chalk drawing of Boa Hancock from One Piece on a standard green chalkboard, positioned centrally. Medium texture: Dusty, matte quality of chalk with visible hatching and cross-hatching. Surrounding elements: Vertical Japanese text reading Pirate Empress to the right. Environment: A standard Japanese school classroom. Background elements: Green chalkboard spans the width of the frame, bordered by a metallic chalk tray. Lighting: Diffuse ambient classroom lighting from overhead fluorescent fixtures mixed with daylight, neutral white approximately 5000K. Camera: 35mm full-frame digital sensor, 35mm prime lens, aperture f/5.6, moderate depth of field keeping chalkboard in focus while foreground softens.",
+          "tags": [
+            "anime",
+            "chalkboard",
+            "documentary",
+            "classroom",
+            "photorealism"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "1.11",
+          "name": "Portrait with Puppy in Snow",
+          "description": "Cute outdoor winter portrait of a young woman holding a small white puppy, preserving reference face exactly",
+          "prompt": "The girl facial features, expression, and identity must remain exactly the same as the reference image. Girl: young, long wavy brown hair, puckering her lips toward the camera, wearing black hooded sweatshirt. Puppy: small white puppy, light blue eyes, calm expression looking forward. Environment: outdoors in a winter scene with snow covering the ground, bare trees in the background, blurred silver car behind the girl, clear light blue sky. Mood: cute, natural, winter outdoor moment. Camera style: soft depth of field, natural daylight, subtle winter tones.",
+          "tags": [
+            "portrait",
+            "winter",
+            "puppy",
+            "outdoor",
+            "cute"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.12",
+          "name": "Fisheye Movie Character Selfie",
+          "description": "Hyper-realistic fisheye selfie with movie/fictional characters, heavy barrel distortion and flash grain",
+          "prompt": "A hyper-realistic fisheye wide-angle 360-degree selfie WITHOUT any camera or phone visible in the subject hands. A real and exaggerated selfie of [person from uploaded image] with [CHARACTERS]. They are making faces at the camera. The image is captured with a vintage 35mm fisheye lens creating heavy barrel distortion. Close-up, distorted group photo with everyone making wild exaggerated faces, squinting slightly from the flash. Lighting: Harsh, direct on-camera flash lighting that creates hard shadows behind the subjects. Authentic film grain, slight motion blur on the edges, and chromatic aberration. Looks like a candid amateur snapshot captured during a chaotic behind-the-scenes moment, not a studio photo.",
+          "tags": [
+            "fisheye",
+            "selfie",
+            "movie-character",
+            "flash",
+            "distortion"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.13",
+          "name": "Character Consistency Selfie with Movie Character",
+          "description": "Realistic on-set selfie with a movie character preserving 100% identical facial features from reference",
+          "prompt": "I'm taking a selfie with [movie character] on the set of [movie name]. Keep the person exactly as shown in the reference image with 100% identical facial features, bone structure, skin tone, facial expression, pose, and appearance. 1:1 aspect ratio, 4K detail.",
+          "tags": [
+            "selfie",
+            "movie-character",
+            "face-consistency",
+            "portrait",
+            "4k"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.14",
+          "name": "Museum Art Exhibition Selfie",
+          "description": "Commercial photograph of a person posed next to a large classical oil painting of themselves in a gallery",
+          "prompt": "A commercial grade photograph of [uploaded reference image] posing inside a high-end museum exhibition space. Based strictly on the uploaded reference image. Behind them hangs a large, ornate framed classical oil painting. The painting depicts the same person but rendered in a rich, traditional oil painting style with thick, visible impasto brushstrokes, deep textures, and rich color palettes on canvas. Gallery spotlights hit the textured paint surface. Masterpiece, ultra-detailed, cinematic lighting, strong contrast, dramatic shadows, 8K UHD.",
+          "tags": [
+            "museum",
+            "oil-painting",
+            "gallery",
+            "portrait",
+            "surreal"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.15",
+          "name": "Compact Camera Screen Display",
+          "description": "Person photo displayed on a real Canon compact camera screen with authentic 2000s digital camera framing",
+          "prompt": "Use facial features of attached photo. A close-up shot of a young woman displayed on the screen of a compact Canon digital camera. The camera body surrounds the image with its buttons, dials, and textured surface visible. The photo on the screen shows the woman indoors at night, illuminated by a bright built-in flash that creates sharp highlights on her face and hair. She has long dark hair falling across part of her face, with a soft slightly open-lip expression. The flash accentuates her features against a dim cluttered kitchen background. Mood: candid, raw, nostalgic, early 2000s digital camera snapshots. Colors: slightly muted with cool undertones, strong flash contrast, natural grain from display. Scale ratio: 4:5 vertical. Camera: compact digital camera simulation, equivalent to 28-35mm lens, aperture f/2.8, ISO 400, harsh direct flash on subject.",
+          "tags": [
+            "2000s",
+            "camera-screen",
+            "nostalgia",
+            "flash",
+            "meta-photography"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "1.16",
+          "name": "Magazine Cover Portrait",
+          "description": "Glossy magazine cover with bold serif title, high-fashion portrait, barcode and date in corner",
+          "prompt": "A photo of a glossy magazine cover, the cover has the large bold words Nano Banana Pro. The text is in a serif font, black on white, and fills the view. No other text. In front of the text there is a dynamic portrait of a person in green and banana yellow colored high-end fashion. Put the issue number and today date in the corner along with a barcode and a price. The magazine is on a white shelf against a wall.",
+          "tags": [
+            "magazine",
+            "fashion",
+            "editorial",
+            "typography",
+            "product"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "1.17",
+          "name": "Luxury Product Photography",
+          "description": "Floating luxury product shot on dark water surrounded by flowers with cinematic lighting and bokeh",
+          "prompt": "Product: [BRAND] [PRODUCT NAME] - [bottle shape], [label description], [liquid color]\n\nScene: Luxury product shot floating on dark water with [flower type] in [colors] arranged around it. [Lighting style] creates reflections and ripples across the water.\n\nMood & Style: [Adjectives], high-end commercial photography, [camera angle], shallow depth of field with soft bokeh background",
+          "tags": [
+            "product",
+            "luxury",
+            "commercial",
+            "bokeh",
+            "water-reflection"
+          ],
+          "requires_reference_image": false
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "name": "Creative Experiments",
+      "styles": [
+        {
+          "id": "2.1",
+          "name": "Star Wars Where's Waldo",
+          "description": "Dense crowd scene of all Star Wars characters on Tatooine in Where's Waldo style",
+          "prompt": "A where is waldo image showing all Star Wars characters on Tatooine. First one to pull this off. First take. Even Waldo is there.",
+          "tags": [
+            "star-wars",
+            "crowd",
+            "wheres-waldo",
+            "pop-culture",
+            "illustration"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.2",
+          "name": "Aging Through the Years",
+          "description": "Series of holiday photos showing one person aging progressively up to 80 years old",
+          "prompt": "Generate the holiday photo of this person through the ages up to 80 years old",
+          "tags": [
+            "aging",
+            "portrait",
+            "temporal",
+            "face-consistency",
+            "sequence"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.3",
+          "name": "Recursive Visuals",
+          "description": "Droste effect infinite loop image - a cat holding an iPad showing the same scene infinitely",
+          "prompt": "recursive image of an orange cat sitting in an office chair holding up an iPad. On the iPad is the same cat in the same scene holding up the same iPad. Repeated on each iPad.",
+          "tags": [
+            "recursive",
+            "droste",
+            "infinite-loop",
+            "surreal",
+            "cat"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.4",
+          "name": "Coordinate Visualization",
+          "description": "Photorealistic scene rendered from GPS coordinates and a specific time of day",
+          "prompt": "35.6586 N, 139.7454 E at 19:00",
+          "tags": [
+            "location",
+            "coordinates",
+            "photorealism",
+            "architecture",
+            "atmosphere"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.5",
+          "name": "Conceptual Visualization",
+          "description": "Interpretative rendering of how a specific professional group perceives a landmark or concept",
+          "prompt": "How engineers see the San Francisco Bridge",
+          "tags": [
+            "conceptual",
+            "perspective",
+            "illustration",
+            "architecture",
+            "humor"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.6",
+          "name": "Literal Interpretation",
+          "description": "Interprets a filename literally as the visual subject of the image",
+          "prompt": "rare.jpg",
+          "tags": [
+            "conceptual",
+            "surreal",
+            "literal",
+            "minimalist",
+            "humor"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.7",
+          "name": "Multi-Subject Compositing",
+          "description": "Composites multiple reference portraits into a single coherent group photo with a unified expression",
+          "prompt": "an office team photo, everyone making a silly face",
+          "tags": [
+            "compositing",
+            "group-photo",
+            "multi-subject",
+            "candid",
+            "humor"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.8",
+          "name": "Whiteboard Marker Art",
+          "description": "Photo-realistic rendering of art drawn on a glass whiteboard in faded marker",
+          "prompt": "Create a photo of vagabonds musashi praying drawn on a glass whiteboard in a slightly faded green marker",
+          "tags": [
+            "whiteboard",
+            "marker-art",
+            "illustration",
+            "glass",
+            "realistic"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.9",
+          "name": "Split View 3D Render",
+          "description": "Floating product render with photorealistic left half and engineering wireframe right half, hard vertical cut",
+          "prompt": "Create a high-quality, realistic 3D render of exactly one instance of the object: [Orange iPhone 17 Pro]. The object must float freely in mid-air and be gently tilted in 3D space. Use a soft minimalist dark background in a clean 1080x1080 composition.\n\nLeft Half - Full Realism: exactly as it looks in real life, accurate materials, colors, textures, reflections, and proportions. Completely opaque, no transparency, no wireframe overlay. No soft transition, no fading, no blending.\n\nRight Half - Hard Cut Wireframe Interior: The boundary must be a perfectly vertical sharp crisp cut line. The wireframe uses only two line colors: Primary white (~80% of lines), Secondary a color sampled from the dominant color of the realistic half (~20%). Thin, precise, aligned, engineering-style lines. Every wireframe component must perfectly match the geometry.\n\nStrict Single-Object Rule: Render only ONE object in the entire frame.\n\nPose: natural subtle tilt in 3D for a floating product visualization. Soft neutral global illumination, no shadows under the object.",
+          "tags": [
+            "3d-render",
+            "product",
+            "wireframe",
+            "split-view",
+            "technical"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.10",
+          "name": "USA 3D Diorama with Landmarks",
+          "description": "High-detail isometric 3D diorama of all US states as miniature platforms with iconic landmark models",
+          "prompt": "Create a high-detail 3D isometric diorama of the entire United States, where each state is represented as its own miniature platform. Inside each state, place a stylized, small-scale 3D model of that state most iconic landmark. Use the same visual style as a cute, polished 3D city diorama: soft pastel colors, clean materials, smooth rounded forms, gentle shadows, and subtle reflections. Each landmark should look like a miniature model, charming, simplified, but clearly recognizable. Arrange the states in accurate geographical layout, with consistent lighting and perspective. Include state labels and landmark labels in a clean modern font, floating above or near each model.",
+          "tags": [
+            "3d-diorama",
+            "usa",
+            "landmarks",
+            "isometric",
+            "miniature"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.11",
+          "name": "US Map Made of Famous Foods",
+          "description": "Map of the US where each state is physically constructed from its most famous regional food",
+          "prompt": "create a map of the US where every state is made out of its most famous food (the states should actually look like they are made of the food, not a picture of the food). Check carefully to make sure each state is right.",
+          "tags": [
+            "map",
+            "food",
+            "usa",
+            "creative",
+            "illustration"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.12",
+          "name": "City's Tallest Buildings 3D Cartoon View",
+          "description": "Side-on orthographic 3D cartoon view of a city's tallest buildings with proportional heights and data labels",
+          "prompt": "Present a clear, side miniature 3D cartoon view of [YOUR CITY] tallest buildings. Use minimal textures with realistic materials and soft lifelike lighting and shadows. Show exactly the three tallest buildings in [YOUR CITY] arranged from LEFT to RIGHT in STRICT descending height order. The tallest must appear visibly tallest, the second must be clearly shorter, and the third clearly shorter than the second. All buildings must follow accurate relative proportions based on real-world references. Each building should stand separately on a thin, simple ceramic base. Below each base, centered text should display: Height in meters (semibold sans-serif) and Year built (lighter-weight sans-serif, directly beneath). Write [YOUR CITY NAME] centered above the buildings using a medium-sized sans-serif font. Use accurate architectural proportions. Consistent camera angle and identical scale for each building model. Straight-on orthographic-style rendering.",
+          "tags": [
+            "3d",
+            "architecture",
+            "city",
+            "infographic",
+            "cartoon"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.13",
+          "name": "3D Isometric Home Office Illustration",
+          "description": "Personalized 3D isometric colored illustration of a home office with interior details and pets",
+          "prompt": "Based on what you know about me, generate a 3D isometric colored illustration of me working from home, filled with various interior details. The visual style should be rounded, polished, and playful. Additional details: a bichon frise and 3 monitors.",
+          "tags": [
+            "isometric",
+            "3d",
+            "illustration",
+            "home-office",
+            "personalized"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.14",
+          "name": "Emoji Combination",
+          "description": "Combines two emojis into a single cohesive Google-style emoji design on white background",
+          "prompt": "combine these emojis: banana + sunglasses, on a white background as a google emoji design",
+          "tags": [
+            "emoji",
+            "illustration",
+            "google",
+            "design",
+            "fun"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.15",
+          "name": "Torn Paper Art Effect",
+          "description": "Adds wide torn-paper reveal effect to specific body areas, exposing a line-art or watercolor interior style",
+          "prompt": "Edit image: add widened torn-paper layered effect. Base image: use reference image. Preserve everything: character identity, facial features and expression, hairstyle and anatomy, outfit design and colors, background, lighting, composition, overall art style. Only modify the torn-paper interior areas. Do not change pose, anatomy, proportions, clothing details, shading, or scene elements. Effects: Add a wide, natural horizontal tear across the chest area, and another across the lower abdomen. Both tears expose line-art interior style: monochrome palette, clean crisp lines, notebook paper with subtle ruled lines.",
+          "tags": [
+            "torn-paper",
+            "mixed-media",
+            "edit",
+            "surreal",
+            "artistic"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.16",
+          "name": "Cinematic Keyframe Generator",
+          "description": "Generates a 9-12 keyframe storyboard contact sheet from one reference image with cinematic 4-beat arc",
+          "prompt": "You are an award-winning trailer director + cinematographer + storyboard artist. Turn ONE reference image into a cohesive cinematic short sequence and output AI-video-ready keyframes.\n\nStep 1 - Scene Breakdown: Identify ALL key subjects, their spatial relationships, interactions, environment, lighting, and time-of-day. List 3-6 visual anchors that must stay constant across all shots.\n\nStep 2 - Theme & Story: One-sentence theme, one trailer-style logline. Emotional Arc: 4 beats (setup/build/turn/payoff).\n\nStep 3 - Cinematic Approach: Shot progression strategy, camera movement plan, lens and exposure suggestions, light and color approach.\n\nStep 4 - Keyframes: 9-12 frames for a coherent 10-20 second sequence with a clear 4-beat arc. Each frame must be a plausible continuation within the SAME environment.\n\nStep 5 - Contact Sheet: ONE single master image: a Cinematic Contact Sheet containing ALL keyframes in one large image. Default grid: 3x3. Each panel labeled with KF number + shot type + suggested duration. Strict continuity across ALL panels.",
+          "tags": [
+            "storyboard",
+            "cinematic",
+            "keyframes",
+            "film",
+            "sequence"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.17",
+          "name": "Photo Book Style Magazine Cover with Coordinates",
+          "description": "9:16 photo book magazine cover placing a person at a real GPS coordinate location as a sightseer",
+          "prompt": "Create a beautiful, photo book style magazine cover that fully utilizes the 9:16 aspect ratio. Place the attached person at the precise coordinates of [latitude/longitude coordinate], seamlessly blending them into the scene as if they are sightseeing. Approach this task with the understanding that this is a critical page that will significantly influence visitor numbers. NEGATIVE: coordinate texts",
+          "tags": [
+            "magazine",
+            "travel",
+            "coordinates",
+            "portrait",
+            "editorial"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.18",
+          "name": "Floating Country Island Diorama",
+          "description": "Hyper-realistic digital poster of a floating miniature island shaped like a country with carved 3D lettering",
+          "prompt": "Create an ultra-HD, hyper-realistic digital poster of a floating miniature island shaped like [COUNTRY], resting on white clouds in the sky. Blend iconic landmarks, natural landscapes (like forests, mountains, or beaches), and cultural elements unique to [COUNTRY]. Carve [COUNTRY] into the terrain using large white 3D letters. Add artistic details like birds native to [COUNTRY], cinematic lighting, vivid colors, aerial perspective, and sun reflections to enhance realism. Ultra-quality, 4K+ resolution. 1080x1080 format.",
+          "tags": [
+            "diorama",
+            "country",
+            "miniature",
+            "aerial",
+            "poster"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.19",
+          "name": "Novel Scene 3D Poster",
+          "description": "DreamWorks-style 3D axonometric miniature diorama poster of a famous scene from a movie or novel",
+          "prompt": "Design a high-quality 3D poster for the movie/novel [Name]. First use your knowledge base to retrieve information about this movie/novel and find a representative famous scene or core location. In the center of the image, construct this scene as a delicate axonometric 3D miniature model. Style: DreamWorks Animation delicate and soft rendering style. Reproduce the architectural details, character dynamics, and environmental atmosphere, naturally integrating into the model lighting. Background: void environment with faint ink wash diffusion and flowing light mist around the model, elegant colors. Bottom layout: center the novel title with a font matching the original style. Below the title, typeset a classic description or quote about this scene, using elegant serif font. Overall layout should be as balanced as a high-end museum exhibit label.",
+          "tags": [
+            "3d",
+            "poster",
+            "novel",
+            "diorama",
+            "miniature"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.20",
+          "name": "Miniature Swimming Pool Diorama",
+          "description": "Surreal toy-like diorama of an oversized product tin repurposed as a whimsical swimming pool with tiny figures",
+          "prompt": "Surreal miniature-world collage poster featuring an oversized open blue Nivea-style tin repurposed as a whimsical swimming pool filled with glossy white cream-water. Tiny sunbathers float in pastel swim rings, lounge on miniature deck chairs, and slide into the cream pool from a small blue slide. The background is a soft warm lightly textured countertop surface, subtle marble or matte stone, evenly lit. Keep the scene grounded with soft shadows beneath props and figures. Surrounding the tin: a small wooden deck with micro figures, pastel umbrellas, lounge chairs, and compact handcrafted accessories. Maintain the hovering pastel inflatables and plush cloud-like shapes as stylised decorative objects staged above the countertop. Preserve the soft, high-saturation, toy-like aesthetic with plush textures, pastel gradients, and gentle lighting.",
+          "tags": [
+            "diorama",
+            "miniature",
+            "surreal",
+            "product",
+            "toy-aesthetic"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.21",
+          "name": "Christmas Ornament 3D Character",
+          "description": "Reference person reimagined as a chibi character inside a transparent Christmas bauble with festive diorama",
+          "prompt": "A transparent Christmas bauble hanging by a red ribbon. Inside, a tiny diorama of the person from the reference reimagined as a cute 3D chibi character. He works at a mini futuristic AI desk with three glowing holo-screens showing neural networks and code. Add tiny plants, a mini coffee cup, soft desk lighting, floating UI icons, and snow-glitter at the base. Warm magical Christmas glow, cinematic reflections on glass, cozy high-end diorama aesthetic. Cinematic lighting, shallow depth of field, soft reflections on the glass, ultra-polished materials, high detail, festive Christmas atmosphere. Whimsical, premium, and heartwarming.",
+          "tags": [
+            "christmas",
+            "chibi",
+            "3d",
+            "diorama",
+            "ornament"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.22",
+          "name": "Ironing Out Wrinkles",
+          "description": "Award-winning macro satirical editorial photo of a miniature iron smoothing wrinkles on an elderly face",
+          "prompt": "An award-winning, hyper-realist macro photograph featuring a miniature iron smoothing wrinkles on an elderly woman face. Main subject: Elderly woman face (macro topography of aging skin). Object: Miniature white and blue iron with realistic plastic textures and a trailing cord. Action: The iron is creating a visible flattened path through the wrinkles, visually simulating a cosmetic procedure. Features: Piercing brown eye, clumped mascara on aging lashes, deeply etched crow feet contrasting with ironed smooth areas, micro-details of vellus hair, capillaries, makeup powder texture. Artistic style: Contemporary Pop-Surrealism, Satirical Editorial, Visual Metaphor. Aesthetic: Maurizio Cattelan style, Vivid Color, Commercial Kitsch, Tactile Realism. Lighting: Studio Ring Flash, High-Key, Hard Shadows, Glossy finish. Camera: Hasselblad H6D-100c, Macro 120mm f/4, Kodak Ektar 100. Resolution: 8k. Mood: Provocative, satirical, disturbingly pristine, humorous yet critical.",
+          "tags": [
+            "macro",
+            "surreal",
+            "editorial",
+            "satirical",
+            "humor"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.23",
+          "name": "Perfectly Isometric Photography",
+          "description": "Photo that appears perfectly isometric - a real captured photo, not a miniature or 3D render",
+          "prompt": "Make a photo that is perfectly isometric. It is not a miniature, it is a captured photo that just happened to be perfectly isometric. It is a photo of [subject].",
+          "tags": [
+            "isometric",
+            "photography",
+            "geometric",
+            "architecture",
+            "perspective"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.24",
+          "name": "Extreme Wide Angle Phone Screen Replacement",
+          "description": "Edit a reference photo with extreme fisheye distortion and replace the phone screen with a second image",
+          "prompt": "Edit type: extreme wide angle phone edit. Source: use reference image, preserve person, face, hairstyle, clothing, and environment style. Camera angle: Ultra-wide or fisheye lens (equivalent to 12-18mm). Perspective effect: nearby objects exaggerated, distant objects smaller. Bring 1-3 body parts extremely close to the camera (e.g. hands, feet, face). Pose variety: extending one hand or leg toward camera, squatting, lying on stomach, lying on ground with legs pointed at camera. Phone handling: allowed. Screen replacement: only the smartphone screen portion, fitted strictly to screen shape with no stretching, display content from second reference image without icons or status bars. Environment: maintain same location and lighting as original image.",
+          "tags": [
+            "fisheye",
+            "wide-angle",
+            "phone-screen",
+            "edit",
+            "distortion"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.25",
+          "name": "Shop Window Cartoon Reflection",
+          "description": "High-end street fashion photo with person outside a toy shop whose window shows their cartoon doll likeness",
+          "prompt": "Create a bright, high-end street-fashion photograph of the woman from the reference image, keeping her face, hair, body, and outfit identical. Setting: outside luxury toy-shop window. Additional element: inside the window display, a cartoon-style big-eyed stylized doll that is an exact likeness of the woman, with her exact features, hair, and outfit. The reflections in the window must be realistic. Photorealistic overall.",
+          "tags": [
+            "fashion",
+            "cartoon",
+            "reflection",
+            "shop-window",
+            "portrait"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.26",
+          "name": "Urban 3D LED Display",
+          "description": "Massive L-shaped glasses-free 3D LED billboard at a city intersection with content breaking through the screen",
+          "prompt": "An enormous L-shaped glasses-free 3D LED screen situated prominently at a bustling urban intersection, designed in an iconic architectural style reminiscent of Shinjuku in Tokyo or Taikoo Li in Chengdu. The screen displays a captivating glasses-free 3D animation featuring [scene description]. The characters and objects possess striking depth and appear to break through the screen boundaries, extending outward or floating vividly in mid-air. Under realistic daylight conditions, these elements cast lifelike shadows onto the screen surface and surrounding buildings. Rich in intricate detail and vibrant colors, the animation seamlessly integrates with the urban setting.\n\nScene description: An adorable giant kitten playfully paws at passing pedestrians, its fluffy paws and curious face extending realistically into the space around the screen.",
+          "tags": [
+            "led-screen",
+            "3d",
+            "urban",
+            "billboard",
+            "anamorphic"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.27",
+          "name": "Trans-Dimensional Liquid Pour",
+          "description": "Hyper-realistic surreal scene of liquid pouring from the physical world into a digital phone screen",
+          "prompt": "Hyper-realistic surreal image. Scene: looking down from a high angle at an iPhone 17 Pro Max (super-scaled) on a wooden table. Physical realm: a human hand pouring from a chilled bottle (visible condensation) containing light green water. The liquid pours toward the phone screen. Digital realm: the iPhone screen is ON and shows a digital character in winter clothing holding an empty drinking glass, waiting for the pour. Surreal bridge event: the liquid does NOT splash off the glass screen surface. The screen acts as a permeable membrane for this liquid only. Physical liquid transitions seamlessly into digital representation upon contact. The digital character catches the poured liquid in the glass. Rendering: hyper-realistic, cinematic warm mood, 8K detail.",
+          "tags": [
+            "surreal",
+            "trans-dimensional",
+            "phone-screen",
+            "liquid",
+            "composite"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.28",
+          "name": "Fisheye Matcha Girl",
+          "description": "Ultra-wide fisheye close-up of a person sipping matcha at a sunny boardwalk with strong lens distortion",
+          "prompt": "Scene: sunny boardwalk with wooden planks, colorful stalls, people walking, distant umbrellas, bright midday sun, clear blue sky. Camera: ultra wide fisheye 12mm lens, very close up, strong barrel distortion, slightly low upward angle. Subject: young person with curious playful expression, large eyes due to lens distortion, leaning forward sipping drink, bright green knit sweater, chunky blue sunglasses. Drink: iced matcha latte, large clear ice cubes, transparent plastic cup, green and white spiral straw. Effects: shallow depth of field with foreground sharp and background soft, glasses showing boardwalk reflection, clean natural color grade. Composition: face extreme closeup, funny intimate casual mood.",
+          "tags": [
+            "fisheye",
+            "matcha",
+            "portrait",
+            "wide-angle",
+            "candid"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "2.29",
+          "name": "Canon IXUS Aesthetic Portrait",
+          "description": "Hyper-realistic point-and-shoot Canon IXUS style portrait with flash lighting and casual pub setting",
+          "prompt": "Canon IXUS aesthetic, point-and-shoot photography. Hyper-realistic. Match facial identity from reference image exactly 100%. Hair: long, natural, lightly messy layered look, blowing gently in wind, strands slightly covering part of face. Makeup: soft pink blush, subtle pink-orange tinted lip outline. Expression: cute, naive, cheerful, slightly sexy undone charm. Pose: half-sitting half-standing, flicking hair. Clothing: black strapless top, low-waisted jeans with floating waistline, thin black fabric choker/wrap. Accessories: small pendant necklace, gold watch. Environment: modern pub with round table, bottle of liquor, glass of liquor in foreground. Style: sharp, direct, realistic, flash-style lighting.",
+          "tags": [
+            "canon-ixus",
+            "point-and-shoot",
+            "flash",
+            "portrait",
+            "casual"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "2.30",
+          "name": "Hyperrealistic Anime Portrait Spotlight",
+          "description": "Dark moody anime-style portrait lit by a single narrow spotlight against pure black - mysterious and dramatic",
+          "prompt": "Generate a hyperrealistic realistic-anime portrait of a female character standing in a completely black background. Lighting: use a narrow beam spotlight focused only on the center of the face. The edges of the light must be sharp and dramatic. All areas outside the spotlight should fall quickly into deep darkness (high falloff shadow), almost blending into the black background. Not soft lighting. Hair: long dark hair with some strands falling over the face. The lower parts of the hair should fade into the shadows. Pose: one hand raised gently to the lips in a shy hesitant gesture. Eyes looking directly at the camera with a mysterious mood. Clothing: black long-sleeve knit sweater; the sweater and body should mostly disappear into the darkness. Overall tone: dark, moody, dramatic, mysterious. High-contrast only in the lit portion of the face.",
+          "tags": [
+            "anime",
+            "hyperrealistic",
+            "spotlight",
+            "dark",
+            "dramatic"
+          ],
+          "requires_reference_image": false
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "name": "Education & Knowledge",
+      "styles": [
+        {
+          "id": "3.1",
+          "name": "Concept Visualization (Text to Infographic)",
+          "description": "Clean flat-vector educational infographic with labeled components, arrows, and textbook-appropriate style",
+          "prompt": "Create an educational infographic explaining [Photosynthesis]. Visual Elements: Illustrate the key components: The Sun, a green Plant, Water (H2O) entering roots, Carbon Dioxide (CO2) entering leaves, and Oxygen (O2) being released. Style: Clean, flat vector illustration suitable for a high school science textbook. Use arrows to show the flow of energy and matter. Labels: Label each element clearly in English.",
+          "tags": [
+            "infographic",
+            "education",
+            "flat-vector",
+            "science",
+            "illustration"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "3.2",
+          "name": "Kids Crayon Travel Journal Illustrator",
+          "description": "Vibrant crayon-style 9:16 travel journal illustration with a winding route map, landmarks, and local food icons",
+          "prompt": "Create a vibrant, child-like crayon-style vertical (9:16) illustration titled {City Name} Travel Journal. The artwork should look as if it were drawn by a curious child using colorful crayons, featuring a soft warm light-toned background (such as pale yellow), combined with bright reds, blues, greens, and other cheerful colors to create a cozy playful travel atmosphere.\n\nMain Scene: Travel-Journal Style Route Map. In the center, draw a winding zigzagging travel route with arrows and dotted lines connecting multiple locations. The route should automatically generate recommended attractions based on {Number of Days}: Stop 1 [attraction + short fun description], Stop 2 [attraction], Final Stop [local signature food or souvenir + warm closing remark].\n\nSurrounding Playful Elements: adorable travel characters, Q-style hand-drawn iconic landmarks, funny signboards (\"Don't get lost!\", \"Yummy food this way!\"), sticker-style short phrases, cute icons of local foods, childlike exclamations.\n\nOverall Art Style: Crayon / children hand-drawn travel diary style. Bright warm colorful palette. Cozy but full and lively composition. All text in a cute handwritten font. Make the entire page feel like a young child fun travel-journal entry.",
+          "tags": [
+            "crayon",
+            "travel",
+            "illustration",
+            "children",
+            "journal"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "3.3",
+          "name": "Financial Sankey Diagram Visualization",
+          "description": "Professional brand-colored Sankey diagram of a corporation income statement with smooth Bezier flow paths",
+          "prompt": "A professional financial Sankey diagram visualizing the Income Statement of a major corporation, in the style of App Economy Insights and US corporate financial reports.\n\nVisual Style: High-fidelity vector infographic, clean minimalist aesthetic, flat design. Background: clean very light grey or off-white.\n\nColor Strategy: Analyze the [Insert Brand Name Here] logo. Extract its primary brand color. Use this as the dominant theme for main revenue flows and profit blocks. Create a harmonious color palette from this color: saturated shades for vertical nodes (bars) and semi-transparent lighter opacity gradients for the flowing paths.\n\nComposition: Flow from Left (Revenue Sources) to Right (Net Profit). The connecting paths (flows) must appear silky smooth with elegant Bezier curves, looking like liquid ribbons, not jagged lines. On the left side (Revenue sources), include specific minimalist flat vector icons representing the business segments. Place the official [Brand Name] logo clearly at the top center or near the central revenue bar.\n\nDetails: High resolution, 4k, sharp typography (sans-serif), professional data visualization layout. The chart clearly distinguishes between Revenue, Gross Profit, Operating Expenses, and Net Profit.",
+          "tags": [
+            "sankey",
+            "finance",
+            "infographic",
+            "data-visualization",
+            "brand"
+          ],
+          "requires_reference_image": false
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "name": "E-commerce & Virtual Studio",
+      "styles": [
+        {
+          "id": "4.1",
+          "name": "Virtual Model Try-On",
+          "description": "Hyper-realistic e-commerce lookbook photo of a model wearing a specific garment from a reference image",
+          "prompt": "Using Image 1 (the garment) and Image 2 (the model), create a hyper-realistic full-body fashion photo where the model is wearing the garment. Crucial Fit Details: The garment must drape naturally on the model body, conforming to their posture and creating realistic folds and wrinkles. High-Fidelity Preservation: Preserve the original fabric texture, color, and any logos from Image 1 with extreme accuracy. Seamless Integration: Blend the garment into Image 2 by perfectly matching the ambient lighting, color temperature, and shadow direction. Photography Style: Clean e-commerce lookbook, shot on a Canon EOS R5 with a 50mm f/1.8 lens for a natural professional look.",
+          "tags": [
+            "fashion",
+            "try-on",
+            "e-commerce",
+            "product",
+            "virtual-fitting"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "4.2",
+          "name": "Professional Product Photography",
+          "description": "Cleanly isolates a product from a messy photo and recreates it as a premium white-background e-commerce shot",
+          "prompt": "Identify the main product in the uploaded photo (automatically removing any hands holding it or messy background details). Recreate it as a premium e-commerce product shot. Subject Isolation: Cleanly extract the product, completely removing any fingers, hands, or clutter. Background: Place the product on a pure white studio background (RGB 255, 255, 255) with a subtle natural contact shadow at the base. Lighting: Use soft commercial studio lighting to highlight the product texture and material. Ensure even illumination with no harsh glare. Retouching: Automatically fix any lens distortion, improve sharpness, and color-correct to make the product look brand new and professional.",
+          "tags": [
+            "product",
+            "e-commerce",
+            "white-background",
+            "studio",
+            "commercial"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "4.3",
+          "name": "3D Chibi-Style Miniature Brand Store",
+          "description": "Cinema 4D blind-box toy aesthetic miniature storefront of a brand with iconic product exterior and cozy interior",
+          "prompt": "3D chibi-style miniature concept store of {Brand Name}, creatively designed with an exterior inspired by the brand most iconic product or packaging. The store features two floors with large glass windows clearly showcasing the cozy and finely decorated interior: {brand primary color}-themed decor, warm lighting, and busy staff dressed in outfits matching the brand. Adorable tiny figures stroll or sit along the street, surrounded by benches, street lamps, and potted plants, creating a charming urban scene. Rendered in a miniature cityscape style using Cinema 4D, with a blind-box toy aesthetic, rich in details and realism, and bathed in soft lighting that evokes a relaxing afternoon atmosphere.",
+          "tags": [
+            "3d",
+            "chibi",
+            "brand",
+            "store",
+            "miniature"
+          ],
+          "requires_reference_image": false
+        },
+        {
+          "id": "4.4",
+          "name": "Room Furnishing Visualization",
+          "description": "Visualizes how furniture would look inside an empty room using an uploaded photo",
+          "prompt": "Show me how this room would look with furniture in it",
+          "tags": [
+            "interior",
+            "furniture",
+            "visualization",
+            "room",
+            "e-commerce"
+          ],
+          "requires_reference_image": true
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "name": "Workplace & Productivity",
+      "styles": [
+        {
+          "id": "5.1",
+          "name": "Hand-drawn Flowchart to Corporate Charts",
+          "description": "Converts a whiteboard sketch into a clean McKinsey-style corporate flowchart with grid-aligned orthogonal arrows",
+          "prompt": "Convert this hand-drawn whiteboard sketch into a professional corporate flowchart suitable for a business presentation. Style Guide: Use a minimalist McKinsey-style aesthetic: clean lines, ample whitespace, and a sophisticated blue-and-gray color palette. Structure: Automatically align all boxes and diamonds to a strict grid. Connect them with straight, orthogonal arrows (90-degree angles only, no curvy lines). Text: Transcribe the handwritten labels into a clear, bold Sans-Serif font (like Arial or Roboto). Output: High-resolution vector-style image on a pure white background.",
+          "tags": [
+            "flowchart",
+            "business",
+            "mckinsey",
+            "whiteboard",
+            "productivity"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "5.2",
+          "name": "UI Hand-drawn Sketch to High-Fidelity Prototype",
+          "description": "Transforms a wireframe scribble into a polished iOS 18 / Material Design 3 mobile app mockup inside an iPhone frame",
+          "prompt": "Transform this rough wireframe sketch into a high-fidelity UI design mockup for a mobile app. Design System: Apply a modern, clean aesthetic similar to iOS 18 or Material Design 3. Use rounded corners, soft drop shadows, and a vibrant primary color. Components: Intelligently interpret the sketch: turn scribbles into high-quality placeholder images, convert rough rectangles into proper buttons with gradients, and turn lines into realistic text blocks. Layout: Ensure perfect padding and consistent spacing between elements. Context: Place the design inside a realistic iPhone 16 frame mockup.",
+          "tags": [
+            "ui",
+            "wireframe",
+            "mobile",
+            "prototype",
+            "design"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "5.3",
+          "name": "Magazine Layout Generator",
+          "description": "Renders unformatted text as a glossy magazine article spread with photos, pull quotes, and bold typography",
+          "prompt": "Put this whole text, verbatim, into a photo of a glossy magazine article on a desk, with photos, beautiful typography design, pull quotes and brave formatting. The text: [...the unformatted article]",
+          "tags": [
+            "magazine",
+            "typography",
+            "layout",
+            "editorial",
+            "print"
+          ],
+          "requires_reference_image": false
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "name": "Photo Editing & Restoration",
+      "styles": [
+        {
+          "id": "6.1",
+          "name": "Composition Rescue (Smart Outpainting)",
+          "description": "Expands a photo to 16:9 by intelligently extending the scenery and completing cut-off objects at the borders",
+          "prompt": "Zoom out and expand this image to a 16:9 aspect ratio (computer wallpaper size). Context Awareness: Seamlessly extend the scenery on both left and right sides. Match the original lighting, weather, and texture perfectly. Logical Completion: If there are cut-off objects (like a shoulder, a tree branch, or a building edge) on the borders, complete them naturally based on logical inference. Do not distort the original center image.",
+          "tags": [
+            "outpainting",
+            "editing",
+            "16:9",
+            "restoration",
+            "extend"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "6.2",
+          "name": "Smart Crowd Removal",
+          "description": "Removes tourists or people from a background and fills the space with matching textures and lighting",
+          "prompt": "Remove all the tourists/people in the background behind the main subject. Intelligent Fill: Replace them with realistic background elements that logically fit the scene (e.g., extend the cobblestone pavement, empty park benches, or grass textures). Consistency: Ensure no blurry artifacts or smudges remain. The filled area must have the same grain, focus depth, and lighting as the rest of the photo.",
+          "tags": [
+            "crowd-removal",
+            "editing",
+            "inpainting",
+            "restoration",
+            "background"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "6.3",
+          "name": "Face Detection CCTV Simulation",
+          "description": "High-angle CCTV-style surveillance shot with white bounding boxes and a zoomed face inset for the main subject",
+          "prompt": "Create a high angle CCTV surveillance shot using the uploaded image as the source. Detect every visible person in the image and automatically draw a white rectangular bounding box around each face. For the most prominent person, add a large zoom-in inset: a sharp enhanced close-up of their face displayed in a floating rectangular frame connected with a thin white line. Keep the main image slightly noisy and security camera-like (soft grain, slight distortion, muted colors), while the zoom-in face box should be clearer, brighter, and more detailed. No text, no timestamps, no overlays except the boxes and connecting line. Maintain the original scene layout, angle, and environment of the uploaded image.",
+          "tags": [
+            "cctv",
+            "surveillance",
+            "face-detection",
+            "security",
+            "edit"
+          ],
+          "requires_reference_image": true
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "name": "Interior Design",
+      "styles": [
+        {
+          "id": "7.1",
+          "name": "Hard Furnishing Preview (Floor Plan to Design)",
+          "description": "Generates a full photorealistic interior design presentation board from a 2D floor plan with multiple room views",
+          "prompt": "Based on the uploaded 2D floor plan, generate a professional interior design presentation board in a single image. Layout: The final image should be a collage with one large main image at the top, and several smaller images below it. Content of Each Panel: 1. Main Image (Top): A wide-angle perspective view of the main living area, showing the connection between the living room and dining area. 2. Small Image (Bottom Left): A view of the Master Bedroom, focusing on the bed and window. 3. Small Image (Bottom Middle): A view of the Home Office / Study room. 4. Small Image (Bottom Right): A 3D top-down floor plan view showing the furniture layout. Overall Style: Apply a consistent Modern Minimalist style with warm oak wood flooring and off-white walls across ALL images. Quality: Photorealistic rendering, soft natural lighting.",
+          "tags": [
+            "interior",
+            "floor-plan",
+            "3d",
+            "rendering",
+            "architecture"
+          ],
+          "requires_reference_image": true
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "name": "Social Media & Marketing",
+      "styles": [
+        {
+          "id": "8.1",
+          "name": "Viral Cover Image (YouTube/TikTok/Douyin)",
+          "description": "High-saturation viral thumbnail with excited expression, pointing gesture, bold text overlay and arrow graphic",
+          "prompt": "Design a viral video thumbnail using the person from Image 1. Face Consistency: Keep the person facial features exactly the same as Image 1, but change their expression to look excited and surprised. Action: Pose the person on the left side, pointing their finger towards the right side of the frame. Subject: On the right side, place a high-quality image of a delicious avocado toast. Graphics: Add a bold yellow arrow connecting the person finger to the toast. Text: Overlay massive pop-style text in the middle: \"3 !\" (Done in 3 mins!). Use thick white outline and drop shadow. Background: A blurred bright kitchen background. High saturation and contrast.",
+          "tags": [
+            "thumbnail",
+            "youtube",
+            "viral",
+            "social-media",
+            "marketing"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "8.2",
+          "name": "Commercial Promotional Poster",
+          "description": "Professional sales poster with cinematic product close-up, integrated typography, badge and footer text",
+          "prompt": "Design a professional promotional poster for a [Coffee Shop]. Composition: A cinematic close-up of a steaming cup of cappuccino on a rustic wooden table, autumn leaves in the background (cozy atmosphere). Text Integration: 1. Main Title: Autumn Special written in elegant gold serif typography at the top. 2. Offer: Buy One Get One Free clearly displayed in a modern badge or sticker style on the side. 3. Footer: Limited Time Only in small clean text at the bottom. Quality: Ensure all text is perfectly spelled, centered, and integrated into the image depth of field.",
+          "tags": [
+            "poster",
+            "marketing",
+            "commercial",
+            "typography",
+            "promotion"
+          ],
+          "requires_reference_image": false
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "name": "Daily Life & Translation",
+      "styles": [
+        {
+          "id": "9.1",
+          "name": "Physical Store / Travel Translation",
+          "description": "Translates menu or signage text while preserving the original surface texture, wear, and aged appearance",
+          "prompt": "Translate the Chinese dish names on the wall menu into English for foreign tourists. Texture Preservation: Crucial! Maintain the original aged, greasy, and textured look of the wall/paper. The new English text should look like it was written/printed on the same surface, with slight fading or wear to match. Currency: Keep the currency symbol and price numbers exactly as they are; do not convert currency. Layout: align the English translations next to or replacing the Chinese characters naturally.",
+          "tags": [
+            "translation",
+            "menu",
+            "texture-preservation",
+            "travel",
+            "editing"
+          ],
+          "requires_reference_image": true
+        },
+        {
+          "id": "9.2",
+          "name": "Digital Content Localization (Comics/Memes)",
+          "description": "Translates speech bubbles or captions in comics/memes while erasing originals and matching font aesthetics",
+          "prompt": "Translate the text in the speech bubbles/captions from [Japanese/English] to [Chinese]. Seamless Cleaning: Erase the original text and perfectly fill the background (e.g., the white speech bubble or the colored image background). Style Matching: Render the translated Chinese text using a casual handwritten-style font (or bold impact font for memes) that matches the aesthetic of the original image. Fit: Ensure the text fits naturally within the bubbles without overcrowding.",
+          "tags": [
+            "translation",
+            "comics",
+            "memes",
+            "localization",
+            "editing"
+          ],
+          "requires_reference_image": true
+        }
+      ]
+    }
+  ]
+}

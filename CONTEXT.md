@@ -39,12 +39,32 @@ How a scene region (or overlay) points at an asset. May carry an **in-point** (`
 _Avoid_: clip, instance
 
 **Caption**:
-A transcript-synced text cue on the dedicated `captions` track — carries `text`, `start`/`end`, and a **caption style**. Kept off the overlays list because captions are voluminous and homogeneous.
+A transcript-synced text cue on the dedicated `captions` track — carries `text`, `start`/`end`, and a **caption style**. Kept off the overlays list because captions are voluminous and homogeneous. A caption renders only the transcript-synced word reveal; non-synced callouts (handwritten notes, arrows) are *not* captions (see **text hook**, and the future callout overlay).
 _Avoid_: subtitle, text overlay, title
 
+**Base caption**:
+The default transcript-synced subtitle. The `captions` track is auto-populated from the transcript word-timings — *not* authored op-by-op by the Director — and every base caption takes the brand kit's **default caption style**.
+_Avoid_: subtitle, default caption (as the canonical term)
+
+**Feature caption**:
+A caption the Director / creative-direction agent places deliberately for a hook or emphasis moment, with a chosen non-default **caption style**. Same entity as a base caption (one `Caption`); the distinction is *who set the style and why*, not a different type.
+_Avoid_: custom caption, hook caption
+
 **Caption style**:
-A named preset controlling a caption's appearance. Three known: `pill` (dark rounded normal speech), `word-bold` (plain white emphasis word), `kinetic` (large pop-in key word).
-_Avoid_: caption type, font
+A registered entry `{id, description, param schema, defaults, renderer}` controlling one caption visual. Resolved through the **caption style registry** exactly as an **overlay type** is resolved through the overlay registry — `id` is an open registry key (validated against the registry; unknown id errors, or skip-with-warning under `strict: false`), *not* a closed enum. Built-ins: `pill`, `word-bold`, `kinetic` (the original generic karaoke look, now configs of one renderer) and `highlight-box` (neon highlighter boxes with per-word pop). Adding a visual = register a new entry; the core schema is untouched.
+_Avoid_: caption type, font, caption preset
+
+**Caption renderer**:
+The React component that paints one caption style's visual (e.g. `HighlightCaptions`). It receives the caption's words with their spoken windows (`runs`), the layer window, canvas + fps, and its own typed **caption style** params — and owns its own phrase/box grouping and animation. It does *not* read brand-kit tokens (deferred). The same component serves both the IR render path and the caption gallery.
+_Avoid_: caption widget, caption view
+
+**Caption style registry**:
+The map `caption style id → caption style entry` — the "caption library." The single place that knows what each caption visual means. The Remotion backend dispatches a `text` layer to a caption renderer through this registry; this is the one place the backend branches on a style name (ADR 0010 amends ADR 0002 to permit it for captions only).
+_Avoid_: caption library (informal), caption map
+
+**Caption gallery**:
+The set of standalone Remotion compositions (registered in `Root.tsx`, alongside `stat_viz`/`motion_graphics`) that preview each caption renderer with sample props. Bypasses the IR; exists so a future frontend can show the user each visual and let them pick. Built from the same caption renderer components the IR path uses.
+_Avoid_: caption preview, caption demo
 
 **Overlay type**:
 The discriminator on an overlay entry, resolved through an **overlay registry** mapping `type → {param schema, defaults, renderer}`. Built-ins include `zoom`, `pan`, `insert`. Adding a new action = registering a new type; the core schema is untouched.

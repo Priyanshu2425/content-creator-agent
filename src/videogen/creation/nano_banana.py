@@ -13,12 +13,25 @@ come back in a part's ``inline_data``. Requires GEMINI_API_KEY or GOOGLE_API_KEY
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 
 from videogen import tracing
 
 _IMAGE_MODEL = "gemini-2.5-flash-image"
+
+
+def _build_contents(prompt: str, reference_images: tuple[bytes, ...]) -> list[Any]:
+    """Build the contents list for generate_content, prepending brand-kit reference images."""
+    if not reference_images:
+        return [prompt]
+    parts: list[Any] = []
+    for img_bytes in reference_images:
+        mime = "image/jpeg" if img_bytes[:3] == b"\xff\xd8\xff" else "image/png"
+        parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(img_bytes).decode()}})
+    parts.append({"text": f"Use the above image(s) as brand style reference. Generate: {prompt}"})
+    return [{"role": "user", "parts": parts}]
 
 
 class NanoBananaCreator:
@@ -30,9 +43,11 @@ class NanoBananaCreator:
         model: str = _IMAGE_MODEL,
         api_key: str | None = None,
         client: Any | None = None,
+        reference_images: tuple[bytes, ...] = (),
     ) -> None:
         self._model = model
         self._client = client if client is not None else _build_client(api_key)
+        self._reference_images = reference_images
 
     def create_image(self, *, prompt: str, out_path: Path, aspect_ratio: str = "9:16") -> Path:
         with tracing.media_create_span(
@@ -41,9 +56,10 @@ class NanoBananaCreator:
             aspect_ratio=aspect_ratio,
             model=self._model,
         ):
+            contents = _build_contents(prompt, self._reference_images)
             response = self._client.models.generate_content(
                 model=self._model,
-                contents=[prompt],
+                contents=contents,
                 config={
                     "response_modalities": ["IMAGE"],
                     "image_config": {"aspect_ratio": aspect_ratio},

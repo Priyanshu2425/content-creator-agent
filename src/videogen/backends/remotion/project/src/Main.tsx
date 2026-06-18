@@ -123,14 +123,14 @@ const TextLayerView: React.FC<{ layer: TextLayer; from: number }> = ({ layer, fr
   ) : (
     <>{layer.runs.map((run) => run.text).join(" ")}</>
   );
+  // "title" style = text hook overlay → pin to upper third (12% from top).
+  // Everything else (captions) stays bottom-aligned.
+  const isTitle = layer.style === "title";
+  const containerStyle: React.CSSProperties = isTitle
+    ? { justifyContent: "flex-start", alignItems: "center", paddingTop: "12%" }
+    : { justifyContent: "flex-end", alignItems: "center", paddingBottom: "20%" };
   return (
-    <AbsoluteFill
-      style={{
-        justifyContent: "flex-end",
-        alignItems: "center",
-        paddingBottom: "20%",
-      }}
-    >
+    <AbsoluteFill style={containerStyle}>
       <div
         style={{
           opacity,

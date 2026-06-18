@@ -13,6 +13,7 @@ import { StatVizBar } from "./stat_viz/Bar";
 import { StatVizGauge } from "./stat_viz/Gauge";
 import { StatVizBeforeAfter } from "./stat_viz/BeforeAfter";
 import { StatVizRatio } from "./stat_viz/Ratio";
+import { ChazonCard, type ChazonCardProps } from "./brand_card/ChazonCard";
 import {
   statVizMetadata,
   type StatVizCounterProps,
@@ -21,6 +22,17 @@ import {
   type StatVizBeforeAfterProps,
   type StatVizRatioProps,
 } from "./stat_viz/types";
+import { MgTitleCard } from "./motion_graphics/TitleCard";
+import { MgLowerThird } from "./motion_graphics/LowerThird";
+import { MgCtaCard } from "./motion_graphics/CTACard";
+import { MgKineticText } from "./motion_graphics/KineticText";
+import {
+  mgMetadata,
+  type MgTitleCardProps,
+  type MgLowerThirdProps,
+  type MgCtaCardProps,
+  type MgKineticTextProps,
+} from "./motion_graphics/types";
 
 const FALLBACK_IR: IR = {
   width: 1080,
@@ -112,6 +124,61 @@ export const RemotionRoot: React.FC = () => {
         durationInFrames={_STAT_VIZ_FALLBACK_FPS * _STAT_VIZ_FALLBACK_DURATION}
         defaultProps={{ numerator: 1, denominator: 3, label: "churn within 90 days", fps: _STAT_VIZ_FALLBACK_FPS, duration_s: _STAT_VIZ_FALLBACK_DURATION, background: "#0D0D0D", primary: "#FFFFFF", accent: "#FF6B35", fontFamily: "Arial" } as StatVizRatioProps}
         calculateMetadata={({ props }) => statVizMetadata(props.fps, props.duration_s)}
+      />
+
+      <Composition
+        id="ChazonCard"
+        component={ChazonCard}
+        width={1080}
+        height={1350}
+        fps={_STAT_VIZ_FALLBACK_FPS}
+        durationInFrames={_STAT_VIZ_FALLBACK_FPS * 6}
+        defaultProps={{ fps: _STAT_VIZ_FALLBACK_FPS, duration_s: 6 } as ChazonCardProps}
+      />
+
+      {/* Motion Graphics compositions */}
+      <Composition
+        id="MgTitleCard"
+        component={MgTitleCard}
+        width={1080}
+        height={1920}
+        fps={_STAT_VIZ_FALLBACK_FPS}
+        durationInFrames={_STAT_VIZ_FALLBACK_FPS * _STAT_VIZ_FALLBACK_DURATION}
+        defaultProps={{ headline: "Title", subtext: "", animation_style: "spring", fps: _STAT_VIZ_FALLBACK_FPS, duration_s: _STAT_VIZ_FALLBACK_DURATION, background: "#0D0D0D", primary: "#FFFFFF", accent: "#FF6B35", accent2: "#FFD700", fontFamily: "Arial" } as MgTitleCardProps}
+        calculateMetadata={({ props }) => mgMetadata(props.fps, props.duration_s)}
+      />
+
+      <Composition
+        id="MgLowerThird"
+        component={MgLowerThird}
+        width={1080}
+        height={1920}
+        fps={_STAT_VIZ_FALLBACK_FPS}
+        durationInFrames={_STAT_VIZ_FALLBACK_FPS * _STAT_VIZ_FALLBACK_DURATION}
+        defaultProps={{ name: "Speaker Name", role: "Role / Title", fps: _STAT_VIZ_FALLBACK_FPS, duration_s: _STAT_VIZ_FALLBACK_DURATION, background: "#0D0D0D", primary: "#FFFFFF", accent: "#FF6B35", accent2: "#FFD700", fontFamily: "Arial" } as MgLowerThirdProps}
+        calculateMetadata={({ props }) => mgMetadata(props.fps, props.duration_s)}
+      />
+
+      <Composition
+        id="MgCtaCard"
+        component={MgCtaCard}
+        width={1080}
+        height={1920}
+        fps={_STAT_VIZ_FALLBACK_FPS}
+        durationInFrames={_STAT_VIZ_FALLBACK_FPS * _STAT_VIZ_FALLBACK_DURATION}
+        defaultProps={{ headline: "Headline", subtext: "", cta: "Follow for more", fps: _STAT_VIZ_FALLBACK_FPS, duration_s: _STAT_VIZ_FALLBACK_DURATION, background: "#0D0D0D", primary: "#FFFFFF", accent: "#FF6B35", accent2: "#000000", fontFamily: "Arial" } as MgCtaCardProps}
+        calculateMetadata={({ props }) => mgMetadata(props.fps, props.duration_s)}
+      />
+
+      <Composition
+        id="MgKineticText"
+        component={MgKineticText}
+        width={1080}
+        height={1920}
+        fps={_STAT_VIZ_FALLBACK_FPS}
+        durationInFrames={_STAT_VIZ_FALLBACK_FPS * _STAT_VIZ_FALLBACK_DURATION}
+        defaultProps={{ text: "Your message here", animation_style: "word_spring", font_size: 88, fps: _STAT_VIZ_FALLBACK_FPS, duration_s: _STAT_VIZ_FALLBACK_DURATION, background: "#0D0D0D", primary: "#FFFFFF", accent: "#FF6B35", accent2: "#FFD700", fontFamily: "Arial" } as MgKineticTextProps}
+        calculateMetadata={({ props }) => mgMetadata(props.fps, props.duration_s)}
       />
     </>
   );

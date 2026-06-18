@@ -50,6 +50,7 @@ class UserMessage:
     """A plain user-role message -- the opening brief plus the initial structured perception."""
 
     text: str
+    images: tuple[bytes, ...] = ()
 
 
 @dataclass(frozen=True)
