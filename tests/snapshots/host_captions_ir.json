@@ -67,7 +67,7 @@
         }
       ],
       "style": "pill",
-      "props": {
+      "params": {
         "font_size": 64,
         "font_weight": 700,
         "color": "#FFFFFF",
@@ -102,7 +102,7 @@
         }
       ],
       "style": "word-bold",
-      "props": {
+      "params": {
         "font_size": 76,
         "font_weight": 800,
         "color": "#FFFFFF",
@@ -159,7 +159,7 @@
         }
       ],
       "style": "kinetic",
-      "props": {
+      "params": {
         "font_size": 120,
         "font_weight": 900,
         "color": "#FFFFFF",

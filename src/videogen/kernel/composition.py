@@ -9,7 +9,7 @@ Cross-cutting checks (scene overlap, gaps, region validity, caption alignment) a
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 AssetId = str
 
@@ -36,12 +36,6 @@ class RegionName(StrEnum):
     full = "full"
     top = "top"
     bottom = "bottom"
-
-
-class CaptionStyle(StrEnum):
-    pill = "pill"
-    word_bold = "word-bold"
-    kinetic = "kinetic"
 
 
 class Anchor(StrEnum):
@@ -298,9 +292,49 @@ class Caption(_Model):
     text: str
     start: float = Field(ge=0)
     end: float = Field(ge=0)
-    style: CaptionStyle = CaptionStyle.pill
+    # An open registry key (not a closed enum): any id registered in the caption style registry is
+    # valid; an unknown id is an error by default (this validator), downgraded to skip-with-warning
+    # under ``Composition.strict = False`` by ``compile_ir`` -- the same rule as an unknown overlay
+    # type (CONTEXT.md "Version / strict mode", ADR 0010). Built-ins: pill / word-bold / kinetic.
+    style: str = "pill"
     z: int = 100  # high z by convention so captions sit on top
     words: tuple[CaptionWord, ...] = ()
+
+    @field_validator("style")
+    @classmethod
+    def _style_is_registered(cls, value: str) -> str:
+        """Reject an unknown caption style id (error-by-default; the registry is the source set)."""
+        # Lazy import so the kernel contract types do not import the plugin package at module load.
+        from videogen.plugins.captions.registry import (
+            caption_style_ids,
+            is_registered_caption_style,
+        )
+
+        if not is_registered_caption_style(value):
+            raise ValueError(
+                f"unknown caption style {value!r}; registered: {sorted(caption_style_ids())}"
+            )
+        return value
+
+
+# --- hook (the opening text-hook, a kernel-level singleton like the captions track) ---
+
+
+class Hook(_Model):
+    """The opening text-hook -- a single kernel-level field, always rendered when present (it is the
+    captions-track pattern for a one-per-video element, not an LLM-placed overlay).
+
+    The ``TextHookAgent`` is its authority: it picks ``text``. The look defaults from the brand kit
+    when the optional style fields are unset (resolved at creation), but each is overridable per hook
+    (``box_color`` defaults to the brand accent, ``text_color`` to a dark contrast). ``placement``
+    defaults to ``top``; ``duration`` is the opening span in seconds (it always starts at t=0)."""
+
+    text: str
+    placement: Literal["top", "center"] = "top"
+    duration: float = Field(default=3.0, gt=0)
+    box_color: str | None = None
+    text_color: str | None = None
+    brand: str | None = None
 
 
 # --- root ---
@@ -321,4 +355,5 @@ class Composition(_Model):
     transitions: list[Transition] = Field(default_factory=list)
     overlays: list[Overlay] = Field(default_factory=list)
     captions: list[Caption] = Field(default_factory=list)
+    hook: Hook | None = None  # the opening text-hook, always rendered when present (ADR 0013)
     audio_budget_summary: AudioBudgetSummary | None = None  # set by AudioDeciderAgent

@@ -33,7 +33,6 @@ from videogen.kernel.composition import (
     AssetId,
     Audio,
     Caption,
-    CaptionStyle,
     CaptionWord,
     Composition,
     CropRect,
@@ -208,6 +207,9 @@ class Builder:
         self, scene_id: str, region: RegionName, asset_id: AssetId, *, in_point: float | None = None
     ) -> OpResult:
         """Place a Reference to an Asset into a Region of a Scene (overwrites any existing fill)."""
+        # Region keys are always RegionName enums (the invariant validator/resolver rely on when they
+        # call region.value). Coerce a str wire value so it can't become a str key in scene.regions.
+        region = RegionName(region)
         index = self._scene_index(scene_id)
         if index is None:
             return _reject(ErrorCode.UNKNOWN_SCENE, f"no scene with id '{scene_id}'", scene_id)
@@ -223,6 +225,7 @@ class Builder:
         first) -- cropping an empty Region rejects. ``crop`` is a normalized window inside the
         source (``CropRect`` enforces it lies within [0,1]); ``None`` is not a value here, clear a
         crop by re-filling the region."""
+        region = RegionName(region)  # keep region keys enum-typed (see fill_region)
         index = self._scene_index(scene_id)
         if index is None:
             return _reject(ErrorCode.UNKNOWN_SCENE, f"no scene with id '{scene_id}'", scene_id)
@@ -283,9 +286,7 @@ class Builder:
         new_scene = scene.model_copy(update={"audio": audio})
         return self._commit(self._with_scene(index, new_scene), scene_id)
 
-    def add_caption(
-        self, text: str, start: float, end: float, style: CaptionStyle = CaptionStyle.pill
-    ) -> OpResult:
+    def add_caption(self, text: str, start: float, end: float, style: str = "pill") -> OpResult:
         """Append one Caption to the dedicated captions track."""
         caption = Caption(text=text, start=start, end=end, style=style)
         captions = [*self._composition.captions, caption]
@@ -293,7 +294,7 @@ class Builder:
         return self._commit(candidate, f"caption[{len(captions) - 1}]")
 
     def add_captions_from_transcript(
-        self, transcript: TranscriptLike, *, style: CaptionStyle = CaptionStyle.pill
+        self, transcript: TranscriptLike, *, style: str = "pill"
     ) -> OpResult:
         """Batch-create Captions from word-timed transcript output, grouped into karaoke **lines**.
 
@@ -349,7 +350,7 @@ class Builder:
         text: str | None = None,
         start: float | None = None,
         end: float | None = None,
-        style: CaptionStyle | None = None,
+        style: str | None = None,
     ) -> OpResult:
         """Retime, restyle, or re-text a Caption in place. Unspecified fields are left untouched."""
         captions = self._composition.captions

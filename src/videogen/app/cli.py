@@ -141,6 +141,9 @@ class Pipeline:
     audio_decider_agent: Any = field(default=None)   # AudioDeciderAgent | None
     describer: Any = field(default=None)             # GeminiDescribeAgent | None
     brand_kit: Any = field(default=None)             # BrandKit | None (the Director's locked design language)
+    pipeline: str = "director-loop"                  # "director-loop" (ADR 0008) or "chain" (ADR 0013)
+    chain_config: Any = field(default=None)          # ChainConfig | None (per-worker ToT, chain only)
+    composer_client: ModelClient | None = None       # the chain Composer's model (ADR 0013: Opus 4.8); falls back to model_client
 
     def run(self, *, host: str, broll: Sequence[str], brief: str) -> str:
         """Walk the pipeline and return the finished mp4's location."""
@@ -247,21 +250,28 @@ class Pipeline:
                     transcript=transcript,
                 )
 
-        with _stage("author"):
-            authored = self.authoring.author(
-                manifest,
-                brief,
-                model_client=self.model_client,
-                reviewer=self.reviewer,
-                renderer=self.renderer,
-                advisor=self.advisor,
-                max_review_rounds=self.max_review_rounds,
-                dispatchers=dispatchers or None,
+        if self.pipeline == "chain":
+            composition = self._author_chain(
+                manifest=manifest,
+                brief=brief,
+                dispatchers=dispatchers,
                 brand_kit=run_brand_kit,
-                timeline_skeleton=skeleton.summary(),
             )
-
-        composition = authored.composition
+        else:
+            with _stage("author"):
+                authored = self.authoring.author(
+                    manifest,
+                    brief,
+                    model_client=self.model_client,
+                    reviewer=self.reviewer,
+                    renderer=self.renderer,
+                    advisor=self.advisor,
+                    max_review_rounds=self.max_review_rounds,
+                    dispatchers=dispatchers or None,
+                    brand_kit=run_brand_kit,
+                    timeline_skeleton=skeleton.summary(),
+                )
+            composition = authored.composition
         if self.audio_decider_agent is not None:
             with _stage("audio-decider"):
                 composition = self.audio_decider_agent.annotate(composition)
@@ -275,6 +285,49 @@ class Pipeline:
             )
         tracing.update_pipeline_output(str(artifact))
         return str(artifact)
+
+    def _author_chain(
+        self,
+        *,
+        manifest: MediaManifest,
+        brief: str,
+        dispatchers: dict[str, Any],
+        brand_kit: Any,
+    ) -> Any:
+        """Author via the chain pipeline (ADR 0013): fixed-order workers + the Composer, reusing the
+        same dispatchers the director loop pulls. A fatal chain stage surfaces as a stage-named
+        ``PipelineError`` (creative-direction / compose); degradable stages continue internally."""
+        from videogen.agent.chain.config import ChainConfig
+        from videogen.agent.chain.strategy import ChainStageError, ChainStrategy
+
+        tokens = None
+        if brand_kit is not None:
+            getter = getattr(brand_kit, "tokens", None)
+            tokens = getter() if callable(getter) else None
+
+        # The Composer runs on its own dedicated client (ADR 0013: Opus 4.8 via Claude Code), not the
+        # authoring client the workers/loop use; falls back to the authoring client if none was wired.
+        strategy = ChainStrategy(
+            model_client=self.composer_client or self.model_client,
+            config=self.chain_config or ChainConfig(),
+        )
+        log.get().stage_start("chain-author")
+        try:
+            with tracing.stage_span("chain-author"):
+                composition = strategy.author(
+                    manifest=manifest,
+                    brief=brief,
+                    dispatchers=dispatchers,
+                    brand_kit_tokens=tokens,
+                )
+            log.get().stage_done("chain-author")
+            return composition
+        except ChainStageError as exc:
+            log.get().stage_error(exc.stage, exc.cause)
+            raise PipelineError(exc.stage, exc.cause) from exc
+        except Exception as exc:
+            log.get().stage_error("chain-author", exc)
+            raise PipelineError("chain-author", exc) from exc
 
     def close(self) -> None:
         """Release any resources the collaborators hold (the render worker pool)."""
@@ -363,11 +416,21 @@ def _make_broll_dispatcher(
 
     def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
         scratchpad = str(guidance.get("scratchpad", ""))
+        log.get().agent_dispatch_input("dispatch_broll", inputs={
+            "brief": brief,
+            "platform": platform,
+            "ideal_cuts_plan": ideal_cuts_plan,
+            "transcript": manifest.transcript.text,
+            "brand_kit": guidance.get("brand_kit"),
+            "creative_direction_scratchpad": scratchpad,
+            "director_guidance": str(guidance.get("guidance", "")),
+        })
         generated = agent.run(
             manifest, brief, platform, ideal_cuts_plan, dest=dest,
             brand_kit_tokens=guidance.get("brand_kit"),  # type: ignore[arg-type]
             creative_direction=scratchpad,
             director_guidance=str(guidance.get("guidance", "")),
+            beats=guidance.get("beats", ()),  # type: ignore[arg-type]
         )
         new_assets: list[NewAsset] = []
         lines: list[str] = []
@@ -375,8 +438,11 @@ def _make_broll_dispatcher(
             asset_id = media.ingest(str(slot.path))
             kind = _asset_type(str(slot.path))
             asset = Asset(type=AssetType(kind.value), src=str(media.resolve(asset_id)))
-            new_assets.append(NewAsset(asset_id=asset_id, asset=asset, description=slot.prompt))
-            lines.append(f"- {asset_id} ({kind.value}): {slot.prompt}")
+            new_assets.append(
+                NewAsset(asset_id=asset_id, asset=asset, description=slot.prompt, beat_id=slot.beat_id)
+            )
+            beat_note = f" [beat {slot.beat_id}]" if slot.beat_id else ""
+            lines.append(f"- {asset_id} ({kind.value}){beat_note}: {slot.prompt}")
         text = (
             "B-roll worker produced these assets (styled to the brand kit):\n" + "\n".join(lines)
             if lines
@@ -394,51 +460,126 @@ def _make_text_hook_dispatcher(*, model_client: ModelClient, transcript_text: st
     and returns its ranked candidates as a proposal. It produces no assets -- the Director picks one
     and places it with ``add_title``.
     """
-    from videogen.agent.dispatch import WorkerProposal
-    from videogen.agent.text_hook import TextHookAgent
+    import os
 
-    agent = TextHookAgent(model_client)
+    from videogen.agent.dispatch import WorkerProposal
+
+    # tot_enabled routing (ADR 0011): the deliberating ToT variant runs only when explicitly
+    # enabled, and only on Gemini (it builds its own hot/cold clients). Default is the legacy worker.
+    if os.getenv("VIDEOGEN_TOT_TEXT_HOOK", "").lower() in {"1", "true", "yes", "on"}:
+        from videogen.agent.text_hook_tot import TextHookToTAgent
+
+        agent: Any = TextHookToTAgent()
+    else:
+        from videogen.agent.text_hook import TextHookAgent
+
+        agent = TextHookAgent(model_client)
 
     def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
+        log.get().agent_dispatch_input("dispatch_text_hook", inputs={
+            "transcript": transcript_text,
+            "audience": str(guidance.get("guidance", "")),
+            "brand_kit": guidance.get("brand_kit"),
+        })
         proposal = agent.generate(
             transcript=transcript_text,
             audience=str(guidance.get("guidance", "")),
             brand_kit=guidance.get("brand_kit"),
         )
-        return WorkerProposal(proposal_text=proposal.to_text(), new_assets=())
+        # The text-hook worker is the hook's authority (ADR 0013): its chosen line becomes the typed
+        # ``composition.hook``. The look defaults from the brand kit (box = accent); the chain writes
+        # the hook to the composition deterministically -- the Composer never places it.
+        from videogen.kernel.composition import Hook
+
+        chosen = proposal.recommended_text() if hasattr(proposal, "recommended_text") else ""
+        bk = guidance.get("brand_kit") or {}
+        accent = (bk.get("colors") or {}).get("accent") if isinstance(bk, dict) else None
+        hook = Hook(text=chosen, box_color=accent, brand="buildspace labs") if chosen else None
+        return WorkerProposal(proposal_text=proposal.to_text(), new_assets=(), hook=hook)
 
     return dispatch
+
+
+def _flag_on(name: str, *, default: bool) -> bool:
+    """Read a truthy env flag, defaulting to ``default`` when unset (ADR 0011/0012 rollout flags)."""
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
 
 
 def _make_creative_direction_dispatcher(
     *, brief: str, transcript_text: str
 ) -> Any:
-    """Build the creative direction worker dispatcher (ADR 0008).
+    """Build the creative direction worker dispatcher (ADR 0008/0012).
 
-    When the Director calls ``dispatch_creative_direction``, this runs the CreativeDirectionAgent
-    over the brief + transcript (plus the Director's scratchpad context and brand-kit tokens) and
-    returns its structured creative direction as a proposal. It produces no assets — the Director
-    uses the direction to guide its authoring decisions.
+    When the Director calls ``dispatch_creative_direction``, this runs the CreativeDirectionAgent over
+    the brief + transcript (plus the Director's scratchpad context and brand-kit tokens). Under
+    ``VIDEOGEN_BEAT_PLAN_ENABLED`` (default **on**, ADR 0012) the worker returns a typed ``BeatPlan``
+    the loop executes into placements; with the flag off it falls back to the legacy prose proposal.
 
     Always uses Gemini (vision-capable) so brand-kit reference images are visible.
     """
+    import os
+
     from videogen.agent.dispatch import WorkerProposal
-    from videogen.agent.creative_direction import CreativeDirectionAgent
     from videogen.agent.clients.gemini import GeminiModelClient
 
-    agent = CreativeDirectionAgent(GeminiModelClient(model="gemini-2.5-flash"))
+    tot = os.getenv("VIDEOGEN_TOT_CREATIVE_DIRECTION", "").lower() in {"1", "true", "yes", "on"}
+    beat_plan_on = _flag_on("VIDEOGEN_BEAT_PLAN_ENABLED", default=True)
+
+    # tot_enabled routing (ADR 0011): the deliberating ToT variant runs only when explicitly enabled.
+    # It still emits prose (typed BeatPlan output for ToT is a later slice), so the beat-plan path is
+    # the single-pass agent only.
+    if tot:
+        from videogen.agent.creative_direction_tot import CreativeDirectionToTAgent
+
+        agent: Any = CreativeDirectionToTAgent()
+    else:
+        from videogen.agent.creative_direction import CreativeDirectionAgent
+
+        agent = CreativeDirectionAgent(GeminiModelClient(model="gemini-2.5-flash"))
 
     def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
-        proposal = agent.generate(
+        log.get().agent_dispatch_input("dispatch_creative_direction", inputs={
+            "brief": brief,
+            "transcript": transcript_text,
+            "brand_kit": guidance.get("brand_kit"),
+            "scratchpad": str(guidance.get("scratchpad", "")),
+            "guidance": str(guidance.get("guidance", "")),
+            "beat_plan_enabled": beat_plan_on and not tot,
+        })
+        kwargs = dict(
             brief=brief,
             transcript=transcript_text,
-            brand_kit=guidance.get("brand_kit"),  # type: ignore[arg-type]
+            brand_kit=guidance.get("brand_kit"),
             scratchpad=str(guidance.get("scratchpad", "")),
             guidance=str(guidance.get("guidance", "")),
         )
-        return WorkerProposal(proposal_text=proposal, new_assets=())
+        if beat_plan_on and not tot:
+            beat_plan = agent.generate(**kwargs)  # type: ignore[arg-type]
+            return WorkerProposal(
+                proposal_text=_summarize_beat_plan(beat_plan),
+                new_assets=(),
+                beat_plan=beat_plan,
+            )
+        # Legacy prose fallback: ToT (still prose) or beat_plan disabled.
+        prose = agent.generate_prose(**kwargs) if not tot else agent.generate(**kwargs)  # type: ignore[arg-type]
+        return WorkerProposal(proposal_text=prose, new_assets=())
 
     return dispatch
+
+
+def _summarize_beat_plan(beat_plan: Any) -> str:
+    """A human-readable digest of the BeatPlan for the shared scratchpad (the Director also receives
+    the typed plan, which it executes deterministically)."""
+    lines = ["Creative direction (BeatPlan):"]
+    for b in beat_plan.beats:
+        lines.append(
+            f"- [{b.id}] {b.role} (words {b.transcript_span[0]}-{b.transcript_span[1]}, "
+            f"{b.asset_spec.kind}): {b.intent}"
+        )
+    return "\n".join(lines)
 
 
 def _make_motion_graphics_dispatcher(
@@ -473,6 +614,15 @@ def _make_motion_graphics_dispatcher(
 
     def dispatch(guidance: dict[str, Any]) -> WorkerProposal:
         scratchpad = str(guidance.get("scratchpad", ""))
+        log.get().agent_dispatch_input("dispatch_motion_graphics", inputs={
+            "brief": brief,
+            "transcript": transcript_text,
+            "creative_direction_scratchpad": scratchpad,
+            "director_guidance": str(guidance.get("guidance", "")),
+            "brand_kit": guidance.get("brand_kit"),
+            "brand_kit_images": f"{len(bk_imgs)} image(s)",
+            "fps": int(manifest.fps),
+        })
         result = agent.run(
             brief=brief,
             transcript=transcript_text,
@@ -640,6 +790,44 @@ def _build_parser() -> argparse.ArgumentParser:
             "force Gemini asset descriptions before authoring."
         ),
     )
+    make.add_argument(
+        "--pipeline",
+        choices=("director-loop", "chain"),
+        default="director-loop",
+        help=(
+            "Authoring topology (ADR 0013). 'director-loop' (default): the Director pulls workers on "
+            "demand and authors op-by-op. 'chain': fixed-order workers + a single Composer that emits "
+            "the Composition directly."
+        ),
+    )
+    make.add_argument(
+        "--tot",
+        action="store_true",
+        help=(
+            "Use the Tree-of-Thoughts deliberating worker variants (ADR 0011) for creative direction "
+            "and text hook. Gemini-only; errors if Gemini is not wired. Works on both pipelines."
+        ),
+    )
+    make.add_argument(
+        "--hook",
+        action="store_true",
+        help=(
+            "Chain pipeline only: enable the opening text-hook (the text-hook worker + the animated "
+            "hook card). Disabled by default -- pass --hook to turn it on."
+        ),
+    )
+
+    preview = sub.add_parser(
+        "preview",
+        help="Open a finished run in the browser (Remotion Studio) from its persisted IR.",
+    )
+    preview.add_argument(
+        "run",
+        help=(
+            "A run directory (e.g. renders/2026-06-21T19-18-33) or a path to a *.ir.json file. "
+            "Stages the run's assets and opens the Main composition in Remotion Studio."
+        ),
+    )
     return parser
 
 
@@ -671,6 +859,8 @@ def build_default_pipeline(
     *,
     authoring_only: bool = False,
     brand_profile: dict[str, Any] | None = None,
+    pipeline: str = "director-loop",
+    chain_config: Any = None,
 ) -> Pipeline:
     """Wire the real services in-process (ADR 0003): MediaService, AuthoringService, and an async
     RenderService behind the render adapter, with the live authoring and review models.
@@ -697,6 +887,14 @@ def build_default_pipeline(
     render_service = RenderService(backend=backend, blobs=FilesystemBlobStore(run_dir))
     renderer = RenderServiceRenderer(render_service)
     model_client = _build_authoring_client(settings)
+
+    # The chain pipeline's Composer runs on its own model (ADR 0013: Opus 4.8 via the Claude Code
+    # SDK), independent of the authoring client the workers use. Built only for the chain.
+    composer_client: ModelClient | None = None
+    if pipeline == "chain":
+        from videogen.agent.clients.claude_code import ClaudeCodeClient
+
+        composer_client = ClaudeCodeClient(model=settings.composer_model)
 
     ideal_cuts_agent = None
     generate_broll_agent = None
@@ -753,6 +951,9 @@ def build_default_pipeline(
         audio_decider_agent=SFXAgent(),  # the single SFX authority (ADR 0009), deterministic
         describer=describer,
         brand_kit=brand_kit,
+        pipeline=pipeline,
+        chain_config=chain_config,
+        composer_client=composer_client,
     )
 
 
@@ -793,6 +994,35 @@ def _real_media() -> MediaPort:
     return MediaService()
 
 
+def _configure_tot(*, tot: bool, pipeline_name: str, hook: bool = False) -> Any:
+    """Apply ``--tot``/``--hook`` and return the ChainConfig record (ADR 0011/0013).
+
+    ToT worker variants are selected via env flags the dispatchers read. ToT is **Gemini-only**, so
+    ``--tot`` without Gemini errors clearly rather than silently falling back to single-pass. In the
+    chain, creative direction stays on its BeatPlan path (a CD-ToT that emits a BeatPlan is a later
+    slice), so ``--tot`` there flips the text-hook worker only; the director-loop flips both.
+
+    ``hook`` (``--hook``) enables the opening text-hook in the chain; it is disabled by default, so
+    the text-hook worker is not dispatched and no hook card is rendered unless turned on.
+    """
+    from videogen.agent.chain.config import ChainConfig
+
+    if pipeline_name == "chain":
+        os.environ["VIDEOGEN_BEAT_PLAN_ENABLED"] = "1"  # the chain's contract: BeatPlan forced on
+    if not tot:
+        return ChainConfig(hook_enabled=hook)
+    if not _has_gemini_api_key():
+        _cli_error(
+            "--tot uses the Tree-of-Thoughts workers, which are Gemini-only; authenticate via ADC "
+            "(GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT) or set GOOGLE_API_KEY/GEMINI_API_KEY."
+        )
+    os.environ["VIDEOGEN_TOT_TEXT_HOOK"] = "1"
+    cd_tot = pipeline_name != "chain"
+    if cd_tot:
+        os.environ["VIDEOGEN_TOT_CREATIVE_DIRECTION"] = "1"
+    return ChainConfig(creative_direction_tot=cd_tot, text_hook_tot=True, hook_enabled=hook)
+
+
 def main(argv: Sequence[str] | None = None, *, pipeline: Pipeline | None = None) -> int:
     """Parse arguments, run the pipeline, print the output path. Returns the process exit code.
 
@@ -804,7 +1034,22 @@ def main(argv: Sequence[str] | None = None, *, pipeline: Pipeline | None = None)
 
     load_dotenv()
     args = _build_parser().parse_args(argv)
+
+    if args.command == "preview":
+        from videogen.app.preview import run_preview
+
+        try:
+            return run_preview(args.run)
+        except FileNotFoundError as exc:
+            _cli_error(str(exc))
+
     authoring_only = bool(getattr(args, "authoring_only", False))
+    pipeline_name = getattr(args, "pipeline", "director-loop")
+    chain_config = _configure_tot(
+        tot=bool(getattr(args, "tot", False)),
+        pipeline_name=pipeline_name,
+        hook=bool(getattr(args, "hook", False)),
+    )
 
     if pipeline is not None:
         # Injected test pipelines use FakeMedia and do not require on-disk b-roll paths.
@@ -831,6 +1076,8 @@ def main(argv: Sequence[str] | None = None, *, pipeline: Pipeline | None = None)
             run_dir,
             authoring_only=authoring_only,
             brand_profile=_load_brand_profile(args.brand_profile),
+            pipeline=pipeline_name,
+            chain_config=chain_config,
         )
     try:
         out = pipe.run(host=args.host, broll=broll, brief=args.brief)

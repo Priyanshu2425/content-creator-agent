@@ -10,10 +10,23 @@ Requires GEMINI_API_KEY or GOOGLE_API_KEY in the environment.
 
 from __future__ import annotations
 
+import random
 import time
 import uuid
 from collections.abc import Sequence
 from typing import Any
+
+# Gemini answers 429 RESOURCE_EXHAUSTED under load. Those are transient -- retry with jittered
+# exponential backoff before giving up. A creative-direction 429 is otherwise *fatal* for the chain.
+_MAX_ATTEMPTS = 5
+_RETRY_BASE_SECONDS = 2.0
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    if getattr(exc, "code", None) == 429 or getattr(exc, "status_code", None) == 429:
+        return True
+    text = str(exc).upper()
+    return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 from videogen.agent.model import (
     AssistantTurn,
@@ -113,8 +126,10 @@ class GeminiModelClient:
         model: str = _DEFAULT_MODEL,
         api_key: str | None = None,
         client: Any | None = None,
+        temperature: float | None = None,
     ) -> None:
         self._model = model
+        self._temperature = temperature
         self._client = client if client is not None else _build_client(api_key)
 
     @property
@@ -131,15 +146,32 @@ class GeminiModelClient:
         from videogen import log
 
         config: dict[str, Any] = {"system_instruction": system}
+        if self._temperature is not None:
+            config["temperature"] = self._temperature
         tool_list = _to_tools(tools)
         if tool_list:
             config["tools"] = tool_list
         t0 = time.monotonic()
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=_to_contents(history),
-            config=config,
-        )
+        contents = _to_contents(history)
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model, contents=contents, config=config
+                )
+                break
+            except Exception as exc:
+                if not _is_rate_limited(exc) or attempt == _MAX_ATTEMPTS - 1:
+                    raise
+                backoff = _RETRY_BASE_SECONDS * (2**attempt)
+                wait = backoff + random.uniform(0.0, backoff)
+                log.get().media_retry(
+                    what=f"gemini ({self._model})",
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_ATTEMPTS,
+                    backoff_s=wait,
+                    error=str(exc),
+                )
+                time.sleep(wait)
         usage = getattr(response, "usage_metadata", None)
         log.get().llm_call(
             agent="GeminiModelClient",

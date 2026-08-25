@@ -135,6 +135,7 @@ class RemotionBackend:
         with tempfile.TemporaryDirectory() as tmp:
             public = Path(tmp) / "public"
             public.mkdir()
+            self._stage_bundled_static(public)
             payload = self._stage_assets(ir, public)
             props = Path(tmp) / "props.json"
             props.write_text(json.dumps({"ir": payload}))
@@ -180,6 +181,25 @@ class RemotionBackend:
                 staged[src] = self._stage_one(Path(src), public)
             layer["src"] = staged[src]
         return payload
+
+    def _stage_bundled_static(self, public: Path) -> None:
+        """Copy the project's committed ``public/`` assets (e.g. the bundled TikTok font) into the
+        render's isolated ``--public-dir`` so ``staticFile`` resolves them alongside the staged media.
+
+        The IR render uses a fresh temp public dir (see ``_invoke``), so committed static assets that
+        are *not* IR-referenced media -- fonts loaded by a caption renderer, say -- would 404 unless
+        copied in. Media staging writes hashed names afterwards, so it never collides with these.
+        """
+        bundled = self.project_dir / "public"
+        if not bundled.is_dir():
+            return
+        for item in bundled.rglob("*"):
+            if not item.is_file():
+                continue
+            target = public / item.relative_to(bundled)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                shutil.copy2(item, target)
 
     @staticmethod
     def _stage_one(src: Path, public: Path) -> str:

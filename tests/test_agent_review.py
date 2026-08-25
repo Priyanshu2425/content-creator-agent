@@ -38,12 +38,14 @@ def test_feedback_carries_timestamped_categorized_severity_tagged_items() -> Non
     assert item.severity is Severity.blocking
 
 
-def test_categories_cover_the_four_full_motion_concerns() -> None:
+def test_categories_cover_the_full_motion_concerns() -> None:
     assert {c.value for c in ReviewCategory} == {
         "caption-sync",
         "caption-occlusion",
         "pacing",
         "framing",
+        "audio",
+        "reel-fit",
     }
 
 

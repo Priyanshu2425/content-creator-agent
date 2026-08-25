@@ -34,7 +34,6 @@ from videogen.kernel.composition import (
     Asset,
     AssetType,
     Caption,
-    CaptionStyle,
     Composition,
     InsertOverlay,
     LayoutName,
@@ -62,7 +61,7 @@ requires_whisper = pytest.mark.skipif(
 )
 
 # Styles cycle across transcript words so the MVP exercises all three in one render.
-_STYLE_CYCLE = [CaptionStyle.pill, CaptionStyle.word_bold, CaptionStyle.kinetic]
+_STYLE_CYCLE = ["pill", "word-bold", "kinetic"]
 
 
 def _probe_duration(path: Path) -> float:
@@ -214,7 +213,7 @@ def host_captioned_ir(
 def test_captions_are_painted_on_time_over_the_host_footage(
     host_ir: object,
     host_captioned_ir: object,
-    caption_specs: list[tuple[str, float, float, CaptionStyle]],
+    caption_specs: list[tuple[str, float, float, str]],
     tmp_path: Path,
 ) -> None:
     backend = RemotionBackend()
@@ -283,9 +282,9 @@ def test_mvp_real_clip_renders_on_time_styled_captions(
 
     assert capped.exists() and abs(_probe_duration(capped) - duration) < 0.3
 
-    pill = next(c for c in captions if c.style is CaptionStyle.pill)
-    bold = next(c for c in captions if c.style is CaptionStyle.word_bold)
-    kinetic = next(c for c in captions if c.style is CaptionStyle.kinetic)
+    pill = next(c for c in captions if c.style == "pill")
+    bold = next(c for c in captions if c.style == "word-bold")
+    kinetic = next(c for c in captions if c.style == "kinetic")
 
     # On time: each word's caption shows at the word, and the trailing silence carries none. (The
     # gap is taken after the last caption -- recognizers don't reliably honor leading silence.)

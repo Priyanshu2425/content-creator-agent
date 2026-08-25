@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from videogen.agent.tools import DRAFT_OPS, DRAFT_TOOLS, TOOLS
 from videogen.creation.base import AudioKind
 from videogen.creation.elevenlabs import ElevenLabsAudioCreator
@@ -107,6 +109,96 @@ def test_nano_banana_create_image_writes_inline_bytes_with_aspect_ratio(tmp_path
     assert gen.kwargs["contents"] == ["bold stat card: 92%"]
     assert gen.kwargs["config"]["response_modalities"] == ["IMAGE"]
     assert gen.kwargs["config"]["image_config"]["aspect_ratio"] == "9:16"
+
+
+class _Flaky429:
+    """Nano Banana fake that raises a 429 the first ``fail_times`` calls, then returns an image."""
+
+    def __init__(self, fail_times: int) -> None:
+        self.calls = 0
+        self.fail_times = fail_times
+
+    def generate_content(self, **_kwargs: Any) -> Any:
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED. {'error': {'code': 429}}")
+        part = SimpleNamespace(inline_data=SimpleNamespace(data=b"\x89PNG-nano"))
+        return SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
+
+
+def test_nano_banana_retries_on_429_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import videogen.creation.nano_banana as nb
+
+    monkeypatch.setattr(nb, "_RETRY_BASE_SECONDS", 0.0)  # no real sleep in the test
+    gen = _Flaky429(fail_times=2)
+    creator = NanoBananaCreator(client=SimpleNamespace(models=gen))
+
+    out = creator.create_image(prompt="x", out_path=tmp_path / "s.png")
+
+    assert out.read_bytes() == b"\x89PNG-nano"
+    assert gen.calls == 3  # two 429s retried, third succeeds
+
+
+def test_nano_banana_reraises_after_exhausting_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import videogen.creation.nano_banana as nb
+
+    monkeypatch.setattr(nb, "_RETRY_BASE_SECONDS", 0.0)
+    monkeypatch.setattr(nb, "_MAX_ATTEMPTS", 3)
+    gen = _Flaky429(fail_times=99)
+    creator = NanoBananaCreator(client=SimpleNamespace(models=gen))
+
+    with pytest.raises(Exception):  # noqa: B017 -- 429 propagates after the cap
+        creator.create_image(prompt="x", out_path=tmp_path / "s.png")
+    assert gen.calls == 3  # capped at _MAX_ATTEMPTS, not infinite
+
+
+def test_nano_banana_logs_each_429_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every backoff is logged via ``media_retry`` so a rate-limited run is visibly retrying."""
+    import videogen.creation.nano_banana as nb
+    from videogen import log
+
+    monkeypatch.setattr(nb, "_RETRY_BASE_SECONDS", 0.0)
+    retries: list[dict] = []
+    spy = SimpleNamespace(media_retry=lambda **kw: retries.append(kw))
+    monkeypatch.setattr(log, "get", lambda: spy)
+
+    gen = _Flaky429(fail_times=2)
+    NanoBananaCreator(client=SimpleNamespace(models=gen)).create_image(
+        prompt="x", out_path=tmp_path / "s.png"
+    )
+
+    assert len(retries) == 2  # two 429s -> two logged retries before the success
+    assert retries[0]["attempt"] == 1 and retries[0]["max_attempts"] == nb._MAX_ATTEMPTS
+    assert "nano-banana" in retries[0]["what"]
+
+
+def test_nano_banana_does_not_retry_non_rate_limit_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import videogen.creation.nano_banana as nb
+
+    monkeypatch.setattr(nb, "_RETRY_BASE_SECONDS", 0.0)
+
+    class _Boom:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_content(self, **_kwargs: Any) -> Any:
+            self.calls += 1
+            raise ValueError("400 INVALID_ARGUMENT")
+
+    gen = _Boom()
+    creator = NanoBananaCreator(client=SimpleNamespace(models=gen))
+
+    with pytest.raises(ValueError):
+        creator.create_image(prompt="x", out_path=tmp_path / "s.png")
+    assert gen.calls == 1  # a non-429 error is not retried
 
 
 class _FakeTTS:

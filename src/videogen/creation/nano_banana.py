@@ -14,12 +14,29 @@ come back in a part's ``inline_data``. Requires GEMINI_API_KEY or GOOGLE_API_KEY
 from __future__ import annotations
 
 import base64
+import random
+import time
 from pathlib import Path
 from typing import Any
 
-from videogen import tracing
+from videogen import log, tracing
 
 _IMAGE_MODEL = "gemini-2.5-flash-image"
+
+# Parallel b-roll generation (ThreadPoolExecutor in GenerateBrollAgent) spikes Gemini's per-minute
+# quota and the API answers 429 RESOURCE_EXHAUSTED. Those are transient, so retry with jittered
+# exponential backoff before giving up on a slot. Tests set ``_RETRY_BASE_SECONDS = 0`` to skip the
+# sleep, mirroring ``google._POLL_SECONDS``.
+_MAX_ATTEMPTS = 5
+_RETRY_BASE_SECONDS = 2.0
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    """Whether ``exc`` is a transient rate-limit / quota error worth retrying (429)."""
+    if getattr(exc, "code", None) == 429 or getattr(exc, "status_code", None) == 429:
+        return True
+    text = str(exc).upper()
+    return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
 def _build_contents(prompt: str, reference_images: tuple[bytes, ...]) -> list[Any]:
@@ -57,17 +74,42 @@ class NanoBananaCreator:
             model=self._model,
         ):
             contents = _build_contents(prompt, self._reference_images)
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=contents,
-                config={
-                    "response_modalities": ["IMAGE"],
-                    "image_config": {"aspect_ratio": aspect_ratio},
-                },
-            )
+            response = self._generate_with_retry(contents, aspect_ratio)
             out_path.write_bytes(_extract_image_bytes(response))
             tracing.update_media_create_output(str(out_path))
         return out_path
+
+    def _generate_with_retry(self, contents: list[Any], aspect_ratio: str) -> Any:
+        """Call ``generate_content``, retrying transient 429s with jittered exponential backoff.
+
+        A non-rate-limit error is re-raised immediately; a 429 is retried up to ``_MAX_ATTEMPTS``
+        times, after which the last error propagates so the caller (per-slot in GenerateBrollAgent)
+        still records the failure rather than hanging.
+        """
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                return self._client.models.generate_content(
+                    model=self._model,
+                    contents=contents,
+                    config={
+                        "response_modalities": ["IMAGE"],
+                        "image_config": {"aspect_ratio": aspect_ratio},
+                    },
+                )
+            except Exception as exc:
+                if not _is_rate_limited(exc) or attempt == _MAX_ATTEMPTS - 1:
+                    raise
+                backoff = _RETRY_BASE_SECONDS * (2**attempt)
+                wait = backoff + random.uniform(0.0, backoff)  # jitter de-syncs parallel retries
+                log.get().media_retry(
+                    what=f"nano-banana ({self._model})",
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_ATTEMPTS,
+                    backoff_s=wait,
+                    error=str(exc),
+                )
+                time.sleep(wait)
+        raise RuntimeError("unreachable: retry loop exited without returning or raising")
 
 
 def _extract_image_bytes(response: Any) -> bytes:

@@ -59,7 +59,7 @@ def make_ir() -> IR:
                 z=100,
                 runs=[TextRun(text="WORLD", emphasis=True)],
                 style="word-bold",
-                props=TextStyle(font_size=76, font_weight=800, color="#FFFFFF"),
+                params=TextStyle(font_size=76, font_weight=800, color="#FFFFFF"),
             ),
             AudioLayer(start=0.0, end=10.0, z=0, src="/renders/host.mp4"),
         ],

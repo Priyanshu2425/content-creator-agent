@@ -1,13 +1,16 @@
-// The IR interpreter. Dispatches on each layer's `kind` -- never on overlay type, caption style, or
-// layout name -- so this stays the single place Remotion code lives (ADR 0002). It understands
-// `media` (a video clip or an image still, placed full-frame or in a normalized sub-rect), `audio`
-// (the voiceover, muxed onto the output), and `text` (captions: paints the compiled visual props
-// and animates the opacity/scale tracks through the shared keyframe sampler).
+// The IR interpreter. Dispatches on each layer's `kind` for media and audio -- never on overlay type
+// or layout name. A `text` layer is the one place the backend branches on a style name: it is
+// dispatched through the caption renderer registry (ADR 0010 amends ADR 0002 for captions only) by
+// its `style` id, with a safe fallback for an unknown id. It understands `media` (a video clip or an
+// image still, placed full-frame or in a normalized sub-rect), `audio` (the voiceover, muxed onto
+// the output), and `text` (captions + the title hook, painted by their registered renderer).
 
 import React from "react";
 import {
   AbsoluteFill,
   Audio,
+  continueRender,
+  delayRender,
   Img,
   OffthreadVideo,
   Sequence,
@@ -15,8 +18,11 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import { getImageDimensions, getVideoMetadata } from "@remotion/media-utils";
+import { resolveCaptionRenderer } from "./captions/registry";
 import { sample } from "./sampler";
-import type { AudioLayer, Layer, MainProps, MediaLayer, Rect, TextLayer } from "./types";
+import type { AudioLayer, HookLayer, Layer, MainProps, MediaLayer, Rect } from "./types";
+import { HookOverlay } from "./brand_card/CenterHookCard";
 
 // A normalized rect becomes a positioned box; its absence fills the frame. Geometry is generic --
 // the backend never knows which layout produced it.
@@ -51,15 +57,42 @@ function fillStyle(crop: Rect | null | undefined): React.CSSProperties {
   };
 }
 
+// Read the source's intrinsic aspect (cached by media-utils) so a wider-than-frame asset (e.g. a
+// 16:9 clip in a 9:16 reel) can be centered/fit rather than cropped. Returns null until resolved.
+function useSourceAspect(src: string, content: "video" | "image"): number | null {
+  const [aspect, setAspect] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    const handle = delayRender(`aspect ${src}`);
+    const p =
+      content === "image" ? getImageDimensions(src) : getVideoMetadata(src);
+    p.then((d: { width: number; height: number }) => {
+      setAspect(d.height ? d.width / d.height : null);
+      continueRender(handle);
+    }).catch(() => continueRender(handle));
+    return () => continueRender(handle);
+  }, [src, content]);
+  return aspect;
+}
+
 const MediaLayerView: React.FC<{ layer: MediaLayer; from: number }> = ({ layer, from }) => {
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   const frame = from + useCurrentFrame(); // absolute timeline frame for the sampler
   const opacity = sample(layer.opacity, frame, fps, 1);
   const scale = sample(layer.transform?.scale, frame, fps, 1);
   const tx = sample(layer.transform?.translate_x, frame, fps, 0);
   const ty = sample(layer.transform?.translate_y, frame, fps, 0);
-  const fill = fillStyle(layer.crop);
   const src = staticFile(layer.src);
+  // A wider-than-frame source (e.g. 16:9 in a 9:16 reel) is centered and fully shown ("contain",
+  // letterboxed against the black base) instead of cropped to cover. An explicit crop wins (the
+  // author chose a window), and a portrait/matching source still covers. The aspect arrives async;
+  // until it does, default to cover so a frame is never blank.
+  const aspect = useSourceAspect(src, layer.content);
+  const frameAspect = width / height;
+  const fit: "cover" | "contain" =
+    !layer.crop && aspect !== null && aspect > frameAspect + 0.01 ? "contain" : "cover";
+  const fill = layer.crop
+    ? fillStyle(layer.crop)
+    : { width: "100%", height: "100%", objectFit: fit };
   // startFrom seeks the source to the layer's in-point so a new Sequence doesn't replay from 0.
   // muted suppresses the video's embedded audio; the AudioLayer is the sole audio master.
   const startFrom = Math.round((layer.in ?? 0) * fps);
@@ -87,69 +120,19 @@ const AudioLayerView: React.FC<{ layer: AudioLayer }> = ({ layer }) => {
   return <Audio src={staticFile(layer.src)} startFrom={startFrom} />;
 };
 
-// Captions sit in the lower third, centered, painted from the layer's compiled props. The pop-in of
-// a kinetic caption rides the same opacity/transform tracks the media layer uses, so the keyframe
-// sampler -- not per-style code -- drives the animation.
-const TextLayerView: React.FC<{ layer: TextLayer; from: number }> = ({ layer, from }) => {
+// The opening text-hook (ADR 0013): rendered by the CenterHookCard's transparent HookOverlay over
+// the live timeline. The renderer owns the cursor/click animation; the layer carries only semantics.
+const HookLayerView: React.FC<{ layer: HookLayer }> = ({ layer }) => {
   const { fps } = useVideoConfig();
-  const frame = from + useCurrentFrame(); // absolute timeline frame for the sampler
-  const opacity = sample(layer.opacity, frame, fps, 1);
-  const scale = sample(layer.transform?.scale, frame, fps, 1);
-  const p = layer.props;
-  const timeS = frame / fps; // absolute seconds, for matching a run's spoken window
-  // Karaoke when any run carries timing: render one line of word-spans and highlight the word
-  // whose [start, end] window contains the current time. Otherwise render the joined line.
-  const karaoke = layer.runs.some((run) => run.start != null);
-  const body = karaoke ? (
-    layer.runs.map((run, i) => {
-      const active =
-        run.start != null && run.end != null && timeS >= run.start && timeS < run.end;
-      const highlight = active && p.highlight_color ? p.highlight_color : p.color;
-      return (
-        <span
-          key={i}
-          style={{
-            display: "inline-block",
-            margin: "0 0.16em",
-            color: highlight,
-            transform: active ? "scale(1.14)" : "scale(1)",
-            textShadow: active ? "0 0 18px rgba(0,0,0,0.45)" : undefined,
-          }}
-        >
-          {run.text}
-        </span>
-      );
-    })
-  ) : (
-    <>{layer.runs.map((run) => run.text).join(" ")}</>
-  );
-  // "title" style = text hook overlay → pin to upper third (12% from top).
-  // Everything else (captions) stays bottom-aligned.
-  const isTitle = layer.style === "title";
-  const containerStyle: React.CSSProperties = isTitle
-    ? { justifyContent: "flex-start", alignItems: "center", paddingTop: "12%" }
-    : { justifyContent: "flex-end", alignItems: "center", paddingBottom: "20%" };
   return (
-    <AbsoluteFill style={containerStyle}>
-      <div
-        style={{
-          opacity,
-          transform: `scale(${scale})`,
-          maxWidth: "82%",
-          textAlign: "center",
-          fontFamily: "Arial, Helvetica, sans-serif",
-          fontSize: p.font_size,
-          fontWeight: p.font_weight,
-          lineHeight: 1.15,
-          color: p.color,
-          background: p.background ?? "transparent",
-          borderRadius: p.border_radius,
-          padding: `${p.padding_y}px ${p.padding_x}px`,
-        }}
-      >
-        {body}
-      </div>
-    </AbsoluteFill>
+    <HookOverlay
+      fps={fps}
+      hookText={layer.text}
+      textColor={layer.text_color}
+      boxColor={layer.box_color}
+      brand={layer.brand}
+      vAlign={layer.placement}
+    />
   );
 };
 
@@ -159,8 +142,14 @@ const LayerView: React.FC<{ layer: Layer; from: number }> = ({ layer, from }) =>
       return <MediaLayerView layer={layer} from={from} />;
     case "audio":
       return <AudioLayerView layer={layer} />;
-    case "text":
-      return <TextLayerView layer={layer} from={from} />;
+    case "text": {
+      // The one name-keyed dispatch: resolve the caption renderer by the layer's style id (ADR
+      // 0010), falling back safely on an unknown id rather than crashing.
+      const CaptionView = resolveCaptionRenderer(layer.style);
+      return <CaptionView layer={layer} from={from} />;
+    }
+    case "hook":
+      return <HookLayerView layer={layer} />;
     default:
       return null;
   }

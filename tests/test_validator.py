@@ -14,7 +14,6 @@ from videogen.kernel.composition import (
     AssetType,
     Audio,
     Caption,
-    CaptionStyle,
     Composition,
     InsertOverlay,
     LayoutName,
@@ -198,7 +197,7 @@ def test_dangling_voiceover_asset_is_an_error() -> None:
 def test_caption_outside_voiceover_bounds_is_an_error() -> None:
     comp = _comp(
         scenes=[_scene("s0", 0.0, DURATION)],
-        captions=[Caption(text="late", start=9.0, end=12.0, style=CaptionStyle.pill)],
+        captions=[Caption(text="late", start=9.0, end=12.0, style="pill")],
     )
     assert ErrorCode.CAPTION_OUT_OF_BOUNDS in _codes(validate_local(comp, duration=DURATION))
 
@@ -206,7 +205,7 @@ def test_caption_outside_voiceover_bounds_is_an_error() -> None:
 def test_caption_start_after_end_is_an_error() -> None:
     comp = _comp(
         scenes=[_scene("s0", 0.0, DURATION)],
-        captions=[Caption(text="bad", start=3.0, end=2.0, style=CaptionStyle.pill)],
+        captions=[Caption(text="bad", start=3.0, end=2.0, style="pill")],
     )
     assert ErrorCode.CAPTION_TIME_ORDER in _codes(validate_local(comp, duration=DURATION))
 
@@ -376,3 +375,40 @@ def test_validate_composes_both_tiers() -> None:
     assert not result.ok  # an error is present
     assert ErrorCode.DANGLING_ASSET in _codes(list(result.errors))
     assert WarningCode.TRAILING_GAP in _codes(list(result.warnings))
+
+
+# --- static-image hold-time: a still b-roll held >1s reads as dead (diagnose: bad placement) ---
+# A non-blocking warning (authoring smell), surfaced to the Director for self-correction. A motion
+# overlay (zoom/pan) over the region makes the image non-static, so it is exempt.
+
+
+def _img(sid: str, start: float, end: float, *, asset: str = "broll") -> Scene:
+    return _scene(sid, start, end, regions={RegionName.full: Ref(asset=asset)})
+
+
+def test_static_image_held_over_one_second_warns() -> None:
+    comp = _comp(scenes=[_img("s0", 0.0, 2.0)])  # "broll" is an image asset
+    assert WarningCode.STATIC_IMAGE_TOO_LONG in _codes(validate_global(comp, duration=DURATION))
+
+
+def test_static_image_within_one_second_does_not_warn() -> None:
+    comp = _comp(scenes=[_img("s0", 0.0, 1.0)])  # exactly 1s is allowed (rule is ">1s")
+    assert WarningCode.STATIC_IMAGE_TOO_LONG not in _codes(validate_global(comp, duration=DURATION))
+
+
+def test_long_image_with_motion_overlay_does_not_warn() -> None:
+    comp = _comp(
+        scenes=[_img("s0", 0.0, 2.0)],
+        overlays=[ZoomOverlay(target=RegionName.full, start=0.0, end=2.0)],
+    )
+    assert WarningCode.STATIC_IMAGE_TOO_LONG not in _codes(validate_global(comp, duration=DURATION))
+
+
+def test_long_video_fill_does_not_warn() -> None:
+    comp = _comp(scenes=[_img("s0", 0.0, 3.0, asset="host")])  # "host" is a video asset
+    assert WarningCode.STATIC_IMAGE_TOO_LONG not in _codes(validate_global(comp, duration=DURATION))
+
+
+def test_static_image_warning_never_blocks_the_gate() -> None:
+    comp = _comp(scenes=[_img("s0", 0.0, 2.0)])
+    assert can_submit_render(comp, duration=DURATION) is True

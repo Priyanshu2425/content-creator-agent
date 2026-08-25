@@ -84,7 +84,7 @@
         }
       ],
       "style": "pill",
-      "props": {
+      "params": {
         "font_size": 64,
         "font_weight": 700,
         "color": "#FFFFFF",

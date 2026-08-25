@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from videogen.agent.gemini_review import GeminiReviewAgent, _parse_feedback
 from videogen.agent.review import ReviewCategory, Severity
 from videogen.kernel.builder import Builder
@@ -77,7 +79,12 @@ class _FakeGenai:
         return SimpleNamespace(text=json.dumps(self._payload))
 
 
-def test_review_uploads_the_video_generates_and_returns_parsed_feedback(tmp_path: Path) -> None:
+def test_review_uploads_the_video_generates_and_returns_parsed_feedback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Pin the Developer-API (files.upload) branch: with Vertex/ADC active in the env, review reads the
+    # bytes inline and never uploads, which the upload-only fake can't model.
+    monkeypatch.setattr("videogen.genai_client.use_vertex_adc", lambda: False)
     video = tmp_path / "render.mp4"
     video.write_bytes(b"fake-mp4")
     client = _FakeGenai(

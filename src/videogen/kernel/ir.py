@@ -77,13 +77,15 @@ class TextRun(_Model):
 
 
 class TextStyle(_Model):
-    """Visual properties of a caption, baked by the compiler from a caption-style preset.
+    """The ``generic`` caption renderer's visual params (ADR 0010), carried by a ``text`` layer.
 
-    The compiler encodes each known style (pill / word-bold / kinetic) into these primitive
-    fields so the backend paints from data and never branches on the style name (ADR 0002).
-    `background` is `None` for styles with no pill; sizes/paddings are in pixels at the IR canvas
-    scale. The pop-in *animation* of `kinetic` is not here -- it rides the layer's `opacity` and
-    `transform.scale` tracks, evaluated per frame by the keyframe sampler.
+    No longer a universal field: this is the param schema of the one ``generic`` caption renderer
+    that ``pill``/``word-bold``/``kinetic`` configure (ADR 0010 amends ADR 0002 for captions). The
+    backend's ``generic`` component paints from these primitive fields, keyed by the layer's
+    ``style`` id through the caption renderer registry. ``background`` is ``None`` for styles with
+    no pill; sizes/paddings are in pixels at the IR canvas scale. The pop-in *animation* of kinetic
+    is not here -- it rides the layer's ``opacity`` and ``transform.scale`` tracks, evaluated per
+    frame by the keyframe sampler.
     """
 
     font_size: int = Field(gt=0)  # px at the IR canvas scale
@@ -94,6 +96,51 @@ class TextStyle(_Model):
     padding_x: int = Field(default=0, ge=0)  # px; horizontal padding inside the pill
     padding_y: int = Field(default=0, ge=0)  # px; vertical padding inside the pill
     highlight_color: str | None = None  # active-word fill for karaoke runs; None = no highlight
+
+
+class HighlightBoxStyle(_Model):
+    """The ``highlight-box`` caption renderer's visual params (ADR 0010), carried by a ``text`` layer.
+
+    The first net-new caption renderer beyond the generic karaoke look: words split into separate
+    wrapping highlighter boxes, each with a small rotation jitter and a per-word spring pop as its
+    spoken window opens. Unlike ``TextStyle`` (the generic renderer's schema) these are the fields
+    *this* renderer paints from -- distinct param schemas per renderer is exactly the openness ADR
+    0010 buys. The renderer owns its own box grouping/animation; the per-word pop is driven by each
+    run's spoken window in the component (not the layer opacity/scale tracks), so the layer carries
+    no animation tracks for this style.
+    """
+
+    font_size: int = Field(gt=0)  # px at the IR canvas scale
+    font_weight: int = Field(ge=100, le=900)
+    text_color: str  # the word text fill, CSS color string
+    box_colors: list[str] = Field(min_length=1)  # highlighter box fills, cycled across words
+    box_radius: int = Field(default=0, ge=0)  # px; each box's corner rounding
+    padding_x: int = Field(default=0, ge=0)  # px; horizontal padding inside each box
+    padding_y: int = Field(default=0, ge=0)  # px; vertical padding inside each box
+    rotation_jitter_deg: float = Field(default=0.0, ge=0.0)  # max absolute per-box rotation
+    pop_seconds: float = Field(default=0.0, ge=0.0)  # per-word spring pop window; 0 = no pop
+    pop_start_scale: float = Field(default=1.0, gt=0.0)  # scale at the start of a word's pop
+
+
+class TikTokStyle(_Model):
+    """The ``tiktok`` caption renderer's visual params (ADR 0010), carried by a ``text`` layer.
+
+    A port of Remotion's TikTok captions template: heavy uppercase-ready text with a thick black
+    stroke (``paintOrder: stroke``), the whole line popping in (scale + rise) and the word being
+    spoken *now* recoloured to ``active_color`` (the template's bright green). Its own param schema,
+    distinct from the generic ``TextStyle`` and the ``HighlightBoxStyle`` -- the renderer owns the
+    per-line enter spring and the active-word highlight, so the layer carries no animation tracks.
+    """
+
+    font_size: int = Field(gt=0)  # px at the IR canvas scale
+    font_weight: int = Field(ge=100, le=900)
+    color: str  # inactive word fill, CSS color string
+    active_color: str  # the word being spoken now, CSS color string
+    stroke_width: int = Field(default=0, ge=0)  # px; black outline thickness (0 = no stroke)
+    stroke_color: str = "#000000"  # outline colour, CSS color string
+    pop_seconds: float = Field(default=0.0, ge=0.0)  # line enter-spring window; 0 = no pop
+    pop_start_scale: float = Field(default=1.0, gt=0.0)  # scale at the start of the enter
+    pop_translate_y: int = Field(default=0, ge=0)  # px the line rises from during the enter
 
 
 # --- layers: common fields + discriminated union on `kind` ---
@@ -121,8 +168,15 @@ class MediaLayer(_Layer):
 class TextLayer(_Layer):
     kind: Literal["text"] = "text"
     runs: list[TextRun] = Field(min_length=1)
-    style: str  # caption-style name carried through as provenance; the backend never branches on it
-    props: TextStyle  # the compiled visual properties the backend actually paints from
+    # The caption style id is now *authoritative*: the backend dispatches this layer to the caption
+    # renderer registered under this id (ADR 0010). `"title"` is the text-hook overlay's own
+    # renderer (not a caption). `params` are that renderer's typed params (the generic TextStyle).
+    style: str
+    # The renderer's typed params the backend paints from. Each caption renderer has its own param
+    # schema (ADR 0010): `generic` (pill/word-bold/kinetic) paints from `TextStyle`, `highlight-box`
+    # from `HighlightBoxStyle`, `tiktok` from `TikTokStyle`. The union is the kernel-side set of
+    # renderer param schemas; each has `extra="forbid"` so a params dict resolves unambiguously.
+    params: TextStyle | HighlightBoxStyle | TikTokStyle
 
 
 class AudioLayer(_Layer):
@@ -131,10 +185,26 @@ class AudioLayer(_Layer):
     in_point: float | None = Field(default=None, alias="in", ge=0)
 
 
-# The three kinds a backend interprets. Adding a kind is the deliberate, all-backends-touching
-# change ADR 0002 anticipates -- not something to grow casually.
+class HookLayer(_Layer):
+    """The opening text-hook, always painted via a backend renderer (the Remotion CenterHookCard).
+
+    Carries *semantic, backend-neutral* params -- the words and the look -- not an animation or a
+    component name, so a non-Remotion backend can paint it differently (ADR 0002, the way captions
+    carry a style id). The cursor/click animation is owned by the renderer, not the IR.
+    """
+
+    kind: Literal["hook"] = "hook"
+    text: str
+    text_color: str = "#0A0A0A"
+    box_color: str = "#FF6B35"
+    brand: str = "buildspace labs"
+    placement: Literal["top", "center"] = "top"
+
+
+# The kinds a backend interprets. Adding a kind is the deliberate, all-backends-touching change
+# ADR 0002 anticipates -- not something to grow casually.
 Layer = Annotated[
-    MediaLayer | TextLayer | AudioLayer,
+    MediaLayer | TextLayer | AudioLayer | HookLayer,
     Field(discriminator="kind"),
 ]
 

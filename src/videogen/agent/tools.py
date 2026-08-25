@@ -5,8 +5,8 @@ Builder op (Phases 4-6) so the model never emits raw Composition JSON. Two invar
 surface honest:
 
 - the enum choices in every tool's input schema are *derived from the kernel enums* (LayoutName,
-  RegionName, CaptionStyle, TransitionKind, the overlay ``type`` union), so a tool cannot offer a
-  value the kernel would reject (maintainer story 29); and
+  RegionName, TransitionKind, the overlay ``type`` union) -- and, for captions, from the caption
+  style registry (ADR 0010) -- so a tool cannot offer a value the kernel rejects (story 29); and
 - ``apply_op`` dispatches a tool call straight onto the matching Builder method, so a tool call with
   given arguments produces the same mutation and OpResult as calling the Builder op directly.
 
@@ -24,17 +24,25 @@ from typing import cast
 from videogen.agent.model import ToolSpec
 from videogen.kernel.builder import Builder, OpResult, TranscriptLike
 from videogen.kernel.composition import (
-    CaptionStyle,
     CropRect,
     LayoutName,
     RegionName,
     TransitionKind,
 )
+from videogen.plugins.captions.registry import caption_style_ids
 
 
 def _choices(enum_cls: type[StrEnum]) -> list[str]:
     """The wire values of a kernel StrEnum, in declared order -- the tool's allowed choices."""
     return [member.value for member in enum_cls]
+
+
+# Caption styles are an open registry (ADR 0010), not a closed enum -- the tool's allowed choices
+# come from the caption style registry. Registry-driven discovery proper is a later slice; this just
+# keeps the same three built-in ids on offer without hardcoding an enum.
+def _caption_style_choices() -> list[str]:
+    """The registered caption style ids -- the allowed choices for the caption-style tool params."""
+    return sorted(caption_style_ids())
 
 
 # --- classification: the loop routes by these sets (mutating ops go through apply_op) ---
@@ -66,6 +74,7 @@ def apply_op(
     args: dict[str, object],
     *,
     transcript: TranscriptLike,
+    default_caption_style: str = "tiktok",
 ) -> OpResult:
     """Dispatch one mutating tool call onto the matching Builder op and return its OpResult.
 
@@ -73,6 +82,10 @@ def apply_op(
     call, so a tool dispatch is indistinguishable from the equivalent direct Builder call (the
     fidelity guarantee). ``transcript`` backs ``add_captions_from_transcript`` -- it is the session
     fact (held on the Media Manifest), not a tool argument.
+
+    ``default_caption_style`` is the brand kit's default caption style id, applied to **base
+    captions** (the auto-populated transcript track) when the Director does not name one (ADR 0010);
+    feature captions still carry whatever style the Director picks.
     """
     if name == "add_scene":
         return builder.add_scene(
@@ -102,12 +115,13 @@ def apply_op(
             cast(str, args["text"]),
             cast(float, args["start"]),
             cast(float, args["end"]),
-            CaptionStyle(cast(str, args.get("style", CaptionStyle.pill.value))),
+            cast(str, args.get("style", "pill")),
         )
     if name == "add_captions_from_transcript":
+        # Base captions: default to the brand kit's caption style when the Director names none.
         return builder.add_captions_from_transcript(
             transcript,
-            style=CaptionStyle(cast(str, args.get("style", CaptionStyle.pill.value))),
+            style=cast(str, args.get("style", default_caption_style)),
         )
     if name == "set_transition":
         return builder.add_transition(
@@ -217,7 +231,7 @@ TOOLS: list[ToolSpec] = [
                 "text": {"type": "string"},
                 "start": _number("caption start, seconds"),
                 "end": _number("caption end, seconds"),
-                "style": {"type": "string", "enum": _choices(CaptionStyle)},
+                "style": {"type": "string", "enum": _caption_style_choices()},
             },
             "required": ["text", "start", "end"],
         },
@@ -230,7 +244,7 @@ TOOLS: list[ToolSpec] = [
         ),
         input_schema={
             "type": "object",
-            "properties": {"style": {"type": "string", "enum": _choices(CaptionStyle)}},
+            "properties": {"style": {"type": "string", "enum": _caption_style_choices()}},
             "required": [],
         },
     ),

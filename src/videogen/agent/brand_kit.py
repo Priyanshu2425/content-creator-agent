@@ -21,9 +21,20 @@ from math import gcd
 from typing import Any
 
 from videogen.agent.stat_viz import StyleBrief
+from videogen.plugins.captions.registry import caption_style_ids, is_registered_caption_style
 
-# The fixed caption-style set the kernel knows (see CONTEXT.md "Caption style").
-CAPTION_STYLES: tuple[str, ...] = ("pill", "word-bold", "kinetic")
+
+def _registered_caption_styles() -> tuple[str, ...]:
+    """The caption-style ids the kernel knows -- now the open caption registry, not a closed enum.
+
+    Adding a renderer (e.g. ``highlight-box``) makes it a valid brand-kit default automatically, with
+    no change here (ADR 0010). Sorted for a stable error message / token view.
+    """
+    return tuple(sorted(caption_style_ids()))
+
+
+# Back-compat alias: callers/tests that imported the closed set get the registered ids instead.
+CAPTION_STYLES: tuple[str, ...] = _registered_caption_styles()
 
 # v1 sound kit: the three real assets that exist under the Remotion project's public/assets/sfx.
 _DEFAULT_SFX_PALETTE: dict[str, str] = {
@@ -34,7 +45,7 @@ _DEFAULT_SFX_PALETTE: dict[str, str] = {
 
 _DEFAULT_COLORS: dict[str, str] = {"bg": "#0D0D0D", "primary": "#FFFFFF", "accent": "#FF6B35"}
 _DEFAULT_FONT = "Inter, Arial, sans-serif"
-_DEFAULT_CAPTION_STYLE = "pill"
+_DEFAULT_CAPTION_STYLE = "tiktok"
 
 
 @dataclass(frozen=True)
@@ -134,9 +145,10 @@ def build_brand_kit(
     colors = {**_DEFAULT_COLORS, **_coerce_colors(profile.get("colors"))}
     font = profile.get("font") or _DEFAULT_FONT
     caption_style = profile.get("caption_style") or _DEFAULT_CAPTION_STYLE
-    if caption_style not in CAPTION_STYLES:
+    if not is_registered_caption_style(caption_style):
         raise ValueError(
-            f"unknown caption_style {caption_style!r}; must be one of {CAPTION_STYLES}"
+            f"unknown caption_style {caption_style!r}; "
+            f"must be a registered caption style: {_registered_caption_styles()}"
         )
 
     safe_zones = _coerce_safe_zones(profile.get("safe_zones"))

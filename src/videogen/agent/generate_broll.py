@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import concurrent.futures
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from videogen.agent.beat_plan import Beat
 
 from videogen import log, tracing
 from videogen.agent.model import (
@@ -37,12 +41,17 @@ _MAX_OPS = 60  # hard budget: slots * 2 (plan turn + tool turns) with headroom
 
 @dataclass(frozen=True)
 class GeneratedSlot:
-    """One successfully generated b-roll asset from a tool call."""
+    """One successfully generated b-roll asset from a tool call.
+
+    ``beat_id`` (ADR 0012) is the beat this asset serves, when the worker was dispatched with a
+    BeatPlan; the Director binds the asset to that beat's placement. ``None`` when not beat-driven.
+    """
 
     slot_index: int
     kind: Literal["image", "video"]
     path: Path
     prompt: str
+    beat_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,8 +70,9 @@ _GENERATE_IMAGE_TOOL = ToolSpec(
     name="generate_image",
     description=(
         "Generate a still-image b-roll asset from a text prompt via Nano Banana. "
-        "Use for: stat cards, social proof screenshots, headline cards, before/after comparisons, "
-        "infographics, UI mockups, establishing stills. "
+        "Use for: social proof screenshots, headline cards, infographics, UI mockups, establishing "
+        "stills, concepts and visual metaphors. "
+        "NEVER use for a numerical/statistical claim — those route to the animated render_* tools. "
         "Returns the local file path of the saved image."
     ),
     input_schema={
@@ -71,6 +81,13 @@ _GENERATE_IMAGE_TOOL = ToolSpec(
             "slot": {
                 "type": "integer",
                 "description": "The SLOT number from the GENERATEBROLL PLAN this generation fills.",
+            },
+            "beat": {
+                "type": "string",
+                "description": (
+                    "The beat id this image serves, copied from the BEATS TO COVER list. Required "
+                    "when beats are listed -- it binds the asset to that beat's placement."
+                ),
             },
             "prompt": {
                 "type": "string",
@@ -219,6 +236,8 @@ You are **BrollGeneratorAgent**, a worker in a video pipeline orchestrated by **
 
 You own one layer only. You do **not** set the design language, own the pacing rules, or assemble the final video — those belong to the Director. You respect what it injects and report what you contribute.
 
+**Each b-roll asset is shown on screen for at most ~1.5 seconds** (the edit caps b-roll holds — it cuts fast). So make every shot a single, instantly-readable, punchy frame that lands its idea in under a second: one clear subject, strong composition, no fine detail or text that needs time to parse. A frame that only reads after 2–3s is wasted here.
+
 ---
 
 ## 1. Inputs the Director injects (treat as authoritative)
@@ -244,7 +263,15 @@ Net-new image generation: illustrations, visual metaphors, designed infographics
 - `search_stock_footage(query, min_resolution, orientation)` — real B-roll clips (royalty-free / CC0).
 - `extract_article(url)` — `{ headline, source, published, key_facts[], quote? }` for sourcing real data.
 
-### C. (handoff) Remotion — the Director composites your layer
+### C. stat-viz toolset (animated data visualizations) — when available
+A **numerical or statistical claim is never a still image**. It always routes to one of these five animated viz tools, never to `generate_image`:
+- `render_counter` — one key number counting up.
+- `render_bar` — two comparable values side by side.
+- `render_gauge` — progress toward a goal (value / max).
+- `render_before_after` — a state change (numeric or qualitative).
+- `render_ratio` — a fraction of a whole ("X in N").
+
+### D. (handoff) Remotion — the Director composites your layer
 You don't call Remotion. You return placement/animation intent in your shot list, expressed in `brand_kit` motion tokens, and the Director assembles it.
 
 ---
@@ -263,14 +290,30 @@ If a wrong or fabricated version would mislead the viewer or misrepresent a real
 |---|---|---|
 | Named brand / company / university (logo) | Yes | `fetch_logo` |
 | News article / cited source | Yes | `capture_screenshot`, or `extract_article` + `generate_image` for a designed infographic |
-| Stat / number / chart | Yes | `extract_article` / supplied data → return as chart intent (Director renders in Remotion) |
+| Data / statistic (any number, percentage, comparison, ratio, progress, state change) | Yes | one of the five `render_*` tools — see §4b. **Never `generate_image`.** |
 | App, tweet, website, product UI | Yes | `capture_screenshot` |
 | Real place / activity / object | Yes | `search_stock_footage` |
-| Concept, metaphor, abstract idea | No | `generate_image` |
-| Designed infographic | Data real, design invented | `extract_article` (data) → `generate_image` (design) |
+| Emotion, concept, metaphor, abstract idea | No | `generate_image` |
+| Social proof, UI mockup, location, designed infographic (non-numeric) | Mixed | `generate_image` (data, if any, comes only from `extract_article`) |
 | Quote, list, definition, label | No | native text intent (Director renders) |
 
 Specifics: always fetch real logos by domain (never generate them). For articles, prefer a real screenshot for proof or an `extract_article`-sourced infographic for explanation — numbers come only from `extract_article`, never the image model, and the source is attributed. Honor footage licensing and surface required attributions in your output.
+
+---
+
+## 4b. Stat sub-type → animated viz tool
+
+Every **Data / statistic** moment picks exactly one of the five animated viz tools. `generate_image` is never the answer for a numerical stat:
+
+| Stat sub-type | Spoken trigger example | Tool |
+|---|---|---|
+| Single number / percentage | "revenue grew 40%", "10x faster" | `render_counter` |
+| Two-value comparison | "80% vs 20%", "A outperforms B" | `render_bar` |
+| Progress toward a goal | "raised $3M of $10M" | `render_gauge` |
+| State change (numeric or qualitative) | "3 hours → 10 minutes", "manual → automated" | `render_before_after` |
+| Fraction of a whole | "1 in 3 users", "2 out of 5" | `render_ratio` |
+
+If the stat-viz tools are not available in this dispatch, leave the stat moment as a native text/chart intent for the Director — still never a fabricated `generate_image` chart.
 
 ---
 
@@ -317,6 +360,7 @@ Rules:
 - `source` ∈ `retrieve`, `generate`, `native`, `both`.
 - Express every `placement`/`animation` in `brand_kit` tokens — do not hardcode fonts, colors, or dimensions.
 - Populate `contributed_changes` so the Director can reconcile global pacing.
+- In the GENERATEBROLL PLAN narration, every slot records its approach: an **Image approach** for `generate_image`/retrieval slots, or an **Animation approach** for stat slots (which `render_*` tool and why). A stat slot must never carry an "Image approach".
 
 ---
 
@@ -368,6 +412,7 @@ class GenerateBrollAgent:
         brand_kit_tokens: dict | None = None,
         creative_direction: str = "",
         director_guidance: str = "",
+        beats: "Sequence[Beat]" = (),
     ) -> GeneratedBroll:
         dest.mkdir(parents=True, exist_ok=True)
         opening = _build_user_message(
@@ -375,6 +420,7 @@ class GenerateBrollAgent:
             creative_direction=creative_direction,
             director_guidance=director_guidance,
         )
+        opening += _beats_to_cover(beats)
         history: list[HistoryItem] = [UserMessage(opening)]
         narration_parts: list[str] = []
         slots: list[GeneratedSlot] = []
@@ -456,6 +502,7 @@ class GenerateBrollAgent:
         slot_index = int(call.args.get("slot", 0))
         prompt = str(call.args.get("prompt", ""))
         aspect_ratio = str(call.args.get("aspect_ratio", "9:16"))
+        beat_id = (str(call.args["beat"]) or None) if call.args.get("beat") else None
 
         if call.name == "generate_image":
             out = dest / f"slot_{slot_index:03d}_{uuid.uuid4().hex[:6]}.png"
@@ -464,7 +511,7 @@ class GenerateBrollAgent:
                     prompt=prompt, out_path=out, aspect_ratio=aspect_ratio
                 )
                 slot = GeneratedSlot(
-                    slot_index=slot_index, kind="image", path=out, prompt=prompt
+                    slot_index=slot_index, kind="image", path=out, prompt=prompt, beat_id=beat_id
                 )
                 log.get().generate_broll_slot(slot_index, "image", True, prompt)
                 return ToolResult(call.id, text=f"image saved: {out}"), slot
@@ -515,6 +562,24 @@ class GenerateBrollAgent:
                 return ToolResult(call.id, text=f"{call.name} failed: {exc}"), None
 
         return ToolResult(call.id, text=f"unknown tool: {call.name!r}"), None
+
+
+def _beats_to_cover(beats: "Sequence[Beat]") -> str:
+    """Render the BeatPlan beats that need a generated image as a BEATS TO COVER block (ADR 0012).
+
+    Each line gives the beat id the model must echo back in the ``beat`` argument so its generation is
+    bound to that beat. Empty when the worker was dispatched without a BeatPlan (legacy path)."""
+    visual = [b for b in beats if b.asset_spec.kind in {"broll-image", "broll-video"}]
+    if not visual:
+        return ""
+    lines = ["\n\n## BEATS TO COVER (generate one image per beat; pass its id as `beat`)"]
+    for b in visual:
+        brief = b.asset_spec.brief or b.intent
+        # treatment carries creative direction's chosen Nano Banana style for this beat (if any) --
+        # apply it to this image's prompt.
+        treat = f"  [style: {b.asset_spec.treatment}]" if b.asset_spec.treatment else ""
+        lines.append(f"- beat `{b.id}` ({b.role}): {brief}{treat}")
+    return "\n".join(lines)
 
 
 def _load_nanobanana_styles() -> str:
@@ -582,6 +647,8 @@ def _build_user_message(
 
     lines += [
         "",
-        "Output the full GENERATEBROLL PLAN first, then execute all generations using your tools.",
+        "Output the full GENERATEBROLL PLAN first (each slot records an Image approach or, for stat "
+        "slots, an Animation approach naming the render_* tool), then execute all generations using "
+        "your tools.",
     ]
     return "\n".join(lines)

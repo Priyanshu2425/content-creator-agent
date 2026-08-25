@@ -18,6 +18,10 @@ node_modules/
 renders/
 out/
 
+# Secrets
+.env
+.env.*
+
 # OS
 .DS_Store
 

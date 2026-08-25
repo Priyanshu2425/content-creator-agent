@@ -109,7 +109,10 @@ def test_next_turn_calls_the_sdk_with_the_translated_request_and_parses_the_repl
         def _create(self, **kwargs: Any) -> Any:
             self.kwargs = kwargs
             return SimpleNamespace(
-                content=[SimpleNamespace(type="tool_use", id="c1", name="finish", input={})]
+                content=[SimpleNamespace(type="tool_use", id="c1", name="finish", input={})],
+                model="claude-sonnet-4-6",
+                usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+                stop_reason="tool_use",
             )
 
     recorder = _Recorder()

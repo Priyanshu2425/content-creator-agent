@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from videogen.kernel.builder import Builder
 from videogen.kernel.compile_ir import compile_ir
-from videogen.kernel.composition import Asset, AssetType, CaptionStyle, LayoutName
+from videogen.kernel.composition import Asset, AssetType, LayoutName
 from videogen.kernel.ir import TextLayer
 from videogen.services.media import Transcript, Word
 
@@ -27,7 +27,7 @@ def _builder_with_line() -> Builder:
             Word(text="hook", start=0.8, end=1.2),
         ]
     )
-    b.add_captions_from_transcript(transcript, style=CaptionStyle.pill)
+    b.add_captions_from_transcript(transcript, style="pill")
     return b
 
 
@@ -55,7 +55,7 @@ def test_caption_props_carry_a_highlight_color_for_the_active_word() -> None:
     ir = compile_ir(b.composition, fps=30, duration=10.0)
     layer = next(layer for layer in ir.layers if isinstance(layer, TextLayer))
 
-    assert layer.props.highlight_color is not None
+    assert layer.params.highlight_color is not None
 
 
 def test_line_layer_spans_the_first_to_last_word() -> None:

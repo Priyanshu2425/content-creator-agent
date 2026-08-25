@@ -20,7 +20,6 @@ from videogen.kernel.composition import (
     AssetType,
     Audio,
     Caption,
-    CaptionStyle,
     Composition,
     LayoutName,
     Ref,
@@ -36,10 +35,10 @@ HOST_FPS = 30
 # The canonical host-plus-captions fixture: one Caption per known style, timed within the host clip.
 # (text, start, end, style). Shared by the IR snapshot and the render integration test so both agree
 # on exactly what is captioned and when. A caption-free lead (< 0.2s) gives a gap to assert against.
-CAPTION_SPECS: list[tuple[str, float, float, CaptionStyle]] = [
-    ("hello there", 0.2, 0.8, CaptionStyle.pill),
-    ("this", 0.9, 1.2, CaptionStyle.word_bold),
-    ("matters", 1.3, 1.8, CaptionStyle.kinetic),
+CAPTION_SPECS: list[tuple[str, float, float, str]] = [
+    ("hello there", 0.2, 0.8, "pill"),
+    ("this", 0.9, 1.2, "word-bold"),
+    ("matters", 1.3, 1.8, "kinetic"),
 ]
 
 _have_ffmpeg = shutil.which("ffmpeg") is not None
@@ -106,7 +105,7 @@ def host_captions_composition(
 
 
 @pytest.fixture(scope="session")
-def caption_specs() -> list[tuple[str, float, float, CaptionStyle]]:
+def caption_specs() -> list[tuple[str, float, float, str]]:
     """The (text, start, end, style) of each caption in the host-plus-captions fixture."""
     return CAPTION_SPECS
 

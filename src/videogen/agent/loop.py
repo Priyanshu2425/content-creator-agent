@@ -40,7 +40,9 @@ from videogen.agent.model import (
 )
 from videogen.agent.perception import Manifest, assemble_perception
 from videogen.agent.prompts import SYSTEM_PROMPT
-from videogen.agent.dispatch import Scratchpad, WorkerDispatcher
+from videogen.agent.beat_execute import execute as execute_beat_plan
+from videogen.agent.beat_plan import BeatPlan
+from videogen.agent.dispatch import NewAsset, Scratchpad, WorkerDispatcher
 from videogen.agent.tools import (
     ADVICE_OP,
     CONSULT_PLACEMENT_TOOL,
@@ -116,6 +118,12 @@ class DirectorLoop:
         self._scratchpad = Scratchpad(log_path=scratchpad_path)
         self._last_director_text: str = ""
         self._timeline_skeleton = timeline_skeleton
+        # Beat-plan execution (ADR 0012): the latest BeatPlan a worker proposed, the beat-keyed assets
+        # accumulated across dispatches, and the beats already placed -- so the deterministic execute
+        # phase is idempotent across repeated dispatches.
+        self._beat_plan: BeatPlan | None = None
+        self._beat_assets: dict[str, NewAsset] = {}
+        self._placed_beats: set[str] = set()
         # Full Director transcript (system prompt, every assistant message + tool call, every tool
         # result), appended to one file across the initial author and all finalization rounds.
         self._chat_path = (artifacts_dir / "director_chat.log") if artifacts_dir is not None else None
@@ -168,7 +176,14 @@ class DirectorLoop:
                 if finished:
                     terminated_clean = True
             history.append(ToolResultsMessage(tuple(results)))
+            # Keep only the newest vision still in memory: large PNG bytes otherwise pile up in the
+            # history and a sighted adapter re-encodes every one of them on every turn (O(n^2)).
+            _evict_stale_vision_images(history)
             if terminated_clean:
+                break
+            # Cost rail (story 33): the op budget bounds a confused/runaway agent that never finishes.
+            # Dispatch ops draw from a separate per-worker budget, so only Builder ops count here.
+            if ops_used >= self._max_ops:
                 break
 
         self._chat_block(
@@ -191,11 +206,12 @@ class DirectorLoop:
         text-return ``consult_placement`` advisor tool in their place (ADR 0007). Otherwise (a
         sighted client, or no advisor) the full ``TOOLS`` list is used unchanged."""
         blind = not getattr(self._client, "consumes_images", True)
-        if blind:
-            # Blind client: drop image vision tools entirely. consult_placement is also disabled
-            # for now — director authors by text only.
-            tools = [t for t in TOOLS if t.name not in VISION_OPS]
+        if blind and self._advisor is not None and self._backend is not None:
+            # Blind client with a working advisor: swap the image vision tools for the text-return
+            # consult_placement channel (ADR 0007).
+            tools = [t for t in TOOLS if t.name not in VISION_OPS] + [CONSULT_PLACEMENT_TOOL]
         else:
+            # Sighted client, or blind with no advisor/backend: full TOOLS list, unchanged.
             tools = list(TOOLS)
         # Advertise each dispatch tool only when its worker is wired (ADR 0008).
         for op_name, spec in DISPATCH_TOOLS.items():
@@ -295,6 +311,10 @@ class DirectorLoop:
             "brand_kit": self._brand_kit_tokens(),
             "scratchpad": self._scratchpad.read_all(),
         }
+        # Beat-driven generation (ADR 0012): hand asset-generating workers the beats they must cover so
+        # each returned asset is tagged with its beat_id, rather than re-deriving intent from prose.
+        if self._beat_plan is not None:
+            guidance["beats"] = self._beat_plan.beats
         # The Director owns the event timeline (ADR 0009): build it from the live composition and
         # hand it to the SFX worker rather than have the worker re-derive it.
         if call.name == "dispatch_sfx":
@@ -310,6 +330,7 @@ class DirectorLoop:
 
         registered, failed = self._register_assets(proposal.new_assets)
         sfx_applied = self._apply_scene_audio(proposal.scene_audio)
+        placed = self._execute_beat_plan(proposal)
         # Record the worker's proposal in the shared scratchpad so later workers and the Director
         # can see what this worker found.
         if proposal.proposal_text:
@@ -326,7 +347,51 @@ class DirectorLoop:
             text += "\n\nAssets that could not be registered (id clash): " + ", ".join(failed)
         if sfx_applied:
             text += f"\n\nSFX placed on {sfx_applied} cut(s) via scene.audio."
+        if placed:
+            text += (
+                f"\n\nBeat plan executed -- {len(placed)} beat(s) placed deterministically: "
+                + ", ".join(placed)
+            )
         return ToolResult(call.id, text=f"{text}\n\n{self._perception()}")
+
+    def _execute_beat_plan(self, proposal: object) -> list[str]:
+        """Run the deterministic placement phase (ADR 0012): accumulate the latest BeatPlan and the
+        beat-keyed assets seen so far, place each beat whose asset is now available (and not yet
+        placed) through the validated op seam, and return the beat ids newly placed.
+
+        Placement is removed from the model: the Director no longer guesses which asset goes where --
+        the asset tagged with beat *B* lands on beat *B*'s span. Beats whose asset has not arrived yet
+        are simply not placed this pass; a later dispatch that produces them triggers their placement.
+        """
+        plan = getattr(proposal, "beat_plan", None)
+        if plan is not None:
+            self._beat_plan = plan
+        for na in getattr(proposal, "new_assets", ()):  # remember beat-keyed assets across dispatches
+            if getattr(na, "beat_id", None):
+                self._beat_assets[na.beat_id] = na
+        if self._beat_plan is None:
+            return []
+
+        placed: list[str] = []
+        for op in execute_beat_plan(self._beat_plan, self._beat_assets, self._manifest.transcript):
+            # execute() emits two ops per beat (add_scene + fill_region) keyed by "beat-<id>". Skip a
+            # beat already placed on an earlier pass so re-execution is idempotent.
+            beat_id = _beat_id_of_op(op)
+            if beat_id is None or beat_id in self._placed_beats:
+                continue
+            result = apply_op(
+                self._builder,
+                op.name,
+                op.args,
+                transcript=self._manifest.transcript,
+                default_caption_style=self._default_caption_style(),
+            )
+            if result.ok:
+                self._store.commit(self._doc_id, self._builder.composition, op=f"beat:{op.name}")
+                if op.name == "fill_region":
+                    self._placed_beats.add(beat_id)
+                    placed.append(beat_id)
+        return placed
 
     def _register_assets(self, new_assets: tuple[object, ...]) -> tuple[list[str], list[str]]:
         ok: list[str] = []
@@ -355,10 +420,19 @@ class DirectorLoop:
         tokens = getattr(self._brand_kit, "tokens", None)
         return tokens() if callable(tokens) else None
 
+    def _default_caption_style(self) -> str:
+        """The brand kit's default caption style id for base captions (ADR 0010); ``tiktok`` if no kit."""
+        style = getattr(self._brand_kit, "caption_style", None)
+        return style if isinstance(style, str) else "tiktok"
+
     def _dispatch_mutation(self, call: ToolCall) -> ToolResult:
         try:
             op = apply_op(
-                self._builder, call.name, call.args, transcript=self._manifest.transcript
+                self._builder,
+                call.name,
+                call.args,
+                transcript=self._manifest.transcript,
+                default_caption_style=self._default_caption_style(),
             )
         except Exception as exc:  # malformed args from the model: feed it back, do not crash
             self._store.note(self._doc_id, op=f"{call.name}[invalid-args]")
@@ -456,6 +530,47 @@ class DirectorLoop:
             if asset.id == self._manifest.voiceover and asset.width and asset.height:
                 return {"width": asset.width, "height": asset.height}
         return {}
+
+
+def _beat_id_of_op(op: object) -> str | None:
+    """Recover the originating beat id from an execute() op, whose scene id is ``beat-<id>``."""
+    args = getattr(op, "args", {})
+    scene_id = args.get("id") or args.get("scene_id")
+    if isinstance(scene_id, str) and scene_id.startswith("beat-"):
+        return scene_id[len("beat-"):]
+    return None
+
+
+def _evict_stale_vision_images(history: list[HistoryItem]) -> None:
+    """Strip image bytes from every vision result except the most recent one.
+
+    Vision stills (``render_still``/``scene_preview``) return full PNG ``bytes`` that the loop keeps
+    in ``history`` for the rest of the run, and a sighted adapter (``AnthropicModelClient``)
+    re-base64-encodes the *entire* history every turn -- so N rendered stills cost O(N^2) memory and
+    tokens. The agent reasons from the latest frame plus the always-fresh perception text, never from
+    stale stills, so older image results are replaced in place with a cheap text stub. Idempotent:
+    re-running over an already-trimmed history is a no-op.
+    """
+    keep = None
+    for i, item in enumerate(history):
+        if isinstance(item, ToolResultsMessage) and any(r.images for r in item.results):
+            keep = i
+    if keep is None:
+        return
+    for i, item in enumerate(history):
+        if i == keep or not isinstance(item, ToolResultsMessage):
+            continue
+        if any(r.images for r in item.results):
+            history[i] = ToolResultsMessage(tuple(_evict_images(r) for r in item.results))
+
+
+def _evict_images(result: ToolResult) -> ToolResult:
+    """Drop a result's image bytes, leaving a stub note so the transcript still records the frame."""
+    if not result.images:
+        return result
+    stub = f"[{len(result.images)} image omitted -- superseded by a newer frame]"
+    text = f"{result.text}\n{stub}" if result.text else stub
+    return ToolResult(result.call_id, text=text, images=())
 
 
 def _last_user_text(history: list[HistoryItem]) -> str:

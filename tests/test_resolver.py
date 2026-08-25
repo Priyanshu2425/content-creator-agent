@@ -13,7 +13,6 @@ from videogen.kernel.composition import (
     AssetType,
     Audio,
     Caption,
-    CaptionStyle,
     Composition,
     InsertOverlay,
     LayoutName,
@@ -107,8 +106,8 @@ def test_active_captions_and_overlays_are_reported_in_paint_order() -> None:
     comp = _comp(
         scenes=[_full_scene("s0", 0.0, DURATION)],
         captions=[
-            Caption(text="low", start=0.0, end=2.0, style=CaptionStyle.pill, z=50),
-            Caption(text="high", start=0.0, end=2.0, style=CaptionStyle.kinetic, z=100),
+            Caption(text="low", start=0.0, end=2.0, style="pill", z=50),
+            Caption(text="high", start=0.0, end=2.0, style="kinetic", z=100),
         ],
         overlays=[InsertOverlay(start=0.0, end=2.0, target=RegionName.full, z=10, asset="broll")],
     )
@@ -133,7 +132,7 @@ def test_transform_overlay_is_active_but_not_painted() -> None:
 def test_captions_composite_over_black_in_a_gap() -> None:
     comp = _comp(
         scenes=[_full_scene("a", 0.0, 4.0), _full_scene("b", 6.0, 10.0)],
-        captions=[Caption(text="over black", start=4.0, end=6.0, style=CaptionStyle.pill)],
+        captions=[Caption(text="over black", start=4.0, end=6.0, style="pill")],
     )
     frame = resolve(comp, 5.0)
     assert frame.is_black
@@ -143,7 +142,7 @@ def test_captions_composite_over_black_in_a_gap() -> None:
 def test_inactive_overlays_and_captions_are_excluded() -> None:
     comp = _comp(
         scenes=[_full_scene("s0", 0.0, DURATION)],
-        captions=[Caption(text="early", start=0.0, end=1.0, style=CaptionStyle.pill)],
+        captions=[Caption(text="early", start=0.0, end=1.0, style="pill")],
     )
     frame = resolve(comp, 5.0)
     assert frame.captions == ()
@@ -174,7 +173,7 @@ def test_timeline_covers_the_whole_composition_and_marks_gaps() -> None:
 def test_timeline_lists_captions_with_text() -> None:
     comp = _comp(
         scenes=[_full_scene("s0", 0.0, DURATION)],
-        captions=[Caption(text="hello there", start=0.2, end=0.8, style=CaptionStyle.pill)],
+        captions=[Caption(text="hello there", start=0.2, end=0.8, style="pill")],
     )
     text = timeline(comp, duration=DURATION)
     assert "hello there" in text

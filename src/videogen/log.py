@@ -74,6 +74,25 @@ class RunLogger:
     def broll_expand_done(self, n_paths: int) -> None:
         self._event("broll_expand_done", level="debug", path_count=n_paths)
 
+    def media_retry(
+        self, *, what: str, attempt: int, max_attempts: int, backoff_s: float, error: str
+    ) -> None:
+        """A transient (429) provider error is being retried with backoff -- logged so a rate-limited
+        run is visibly retrying rather than silently stalling."""
+        self._console.print(
+            f"    [yellow]↻[/yellow] [dim]{what}[/dim] rate-limited; "
+            f"retry [yellow]{attempt}/{max_attempts}[/yellow] in {backoff_s:.1f}s"
+        )
+        self._event(
+            "media_retry",
+            level="warn",
+            what=what,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            backoff_s=round(backoff_s, 2),
+            error=error[:200],
+        )
+
     # --- NDJSON core ----------------------------------------------------------
 
     def _event(self, event: str, *, level: str = "info", **fields: Any) -> None:
@@ -208,6 +227,13 @@ class RunLogger:
 
     def agent_tool_call(self, name: str, args: dict[str, Any]) -> None:
         self._event("authoring_tool_call", level="debug", tool=name, args=args)
+
+    def agent_dispatch_input(self, worker: str, *, inputs: dict[str, Any]) -> None:
+        """The complete payload handed to a dispatched worker (ADR 0008): every input the worker
+        agent actually received -- the bound transcript/brief plus the per-dispatch guidance,
+        scratchpad and brand kit. Logged in full at debug so a run's worker inputs are recoverable,
+        not just the worker's returned proposal."""
+        self._event("authoring_dispatch_input", level="debug", worker=worker, inputs=inputs)
 
     def agent_tool_ok(self, name: str) -> None:
         self._console.print(f"    [dim]→[/dim] [cyan]{name}[/cyan]  [green]✓[/green]")
@@ -451,6 +477,7 @@ class _NullLogger:
     def agent_event_start(self, agent: str, **context: Any) -> None: pass
     def agent_event_complete(self, agent: str, *, duration_ms: int, **summary: Any) -> None: pass
     def agent_event_error(self, agent: str, *, error_message: str, fallback_applied: bool = False) -> None: pass
+    def media_retry(self, *, what: str, attempt: int, max_attempts: int, backoff_s: float, error: str) -> None: pass
     # pipeline stages
     def stage_start(self, name: str) -> None: pass
     def stage_done(self, name: str) -> None: pass
@@ -459,6 +486,7 @@ class _NullLogger:
     def agent_start(self, budget: int) -> None: pass
     def agent_narration(self, text: str | None) -> None: pass
     def agent_tool_call(self, name: str, args: dict[str, Any]) -> None: pass
+    def agent_dispatch_input(self, worker: str, *, inputs: dict[str, Any]) -> None: pass
     def agent_tool_ok(self, name: str) -> None: pass
     def agent_tool_rejected(self, name: str, reasons: str) -> None: pass
     def agent_tool_error(self, name: str, error: str) -> None: pass

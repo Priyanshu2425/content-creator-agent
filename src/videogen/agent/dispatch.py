@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from videogen.kernel.composition import Asset, AssetId
+from videogen.agent.beat_plan import BeatPlan
+from videogen.kernel.composition import Asset, AssetId, Hook
 
 
 @dataclass
@@ -74,21 +75,32 @@ class Scratchpad:
 
 @dataclass(frozen=True)
 class NewAsset:
-    """An asset a worker produced, ready for the loop to register into the Builder library."""
+    """An asset a worker produced, ready for the loop to register into the Builder library.
+
+    ``beat_id`` (ADR 0012) tags the asset with the beat it serves, so the Director binds it to that
+    beat's placement by lookup rather than re-matching descriptions. Workers not driven by a BeatPlan
+    (e.g. SFX) leave it ``None``.
+    """
 
     asset_id: AssetId
     asset: Asset
     description: str = ""
+    beat_id: str | None = None
 
 
 @dataclass(frozen=True)
 class WorkerProposal:
-    """What a dispatched worker returns to the Director: advisory text, any new assets, and any
-    cut-bound SFX placements (scene_id -> sound) the loop applies via ``Builder.set_scene_audio``."""
+    """What a dispatched worker returns to the Director: advisory text, any new assets, any cut-bound
+    SFX placements (scene_id -> sound) the loop applies via ``Builder.set_scene_audio``, and -- for a
+    beat-driven worker (ADR 0012) -- the typed ``BeatPlan`` the loop executes into placements."""
 
     proposal_text: str
     new_assets: tuple[NewAsset, ...] = field(default_factory=tuple)
     scene_audio: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    beat_plan: BeatPlan | None = None
+    # The opening text-hook (ADR 0013): the text-hook worker's authoritative output, written to
+    # ``composition.hook`` by the chain. ``None`` for workers that don't produce a hook.
+    hook: Hook | None = None
 
 
 # Given a guidance dict (the Director's optional focus + the injected brand-kit tokens), produce a

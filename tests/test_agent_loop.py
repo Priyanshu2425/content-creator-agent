@@ -291,6 +291,42 @@ def test_vision_tools_route_through_render_still_only_and_only_when_asked() -> N
     assert "render_still" in journal and "scene_preview" in journal
 
 
+def test_stale_vision_images_are_evicted_from_history_to_bound_memory() -> None:
+    """Only the most recent vision result keeps its image bytes; older image results are replaced
+    by a text stub. Without this, a long run accumulates every still it ever rendered in ``history``
+    and a sighted adapter re-encodes all of them on every turn -- O(n^2) memory and tokens.
+    """
+    client = ScriptedClient(
+        [
+            turn(call("render_still", t=1.0)),
+            turn(call("render_still", t=1.5)),
+            turn(call("finish")),
+        ]
+    )
+    loop, _builder, _store, _doc = make_loop(
+        client, backend=CountingBackend(), builder=seeded_builder()
+    )
+
+    loop.run()
+
+    # On the turn the model emits finish it has been handed both render_still results.
+    history = client.seen[2]
+    results = [
+        r
+        for item in history
+        if isinstance(item, ToolResultsMessage)
+        for r in item.results
+    ]
+    image_results = [r for r in results if r.images or (r.text and "image omitted" in r.text)]
+    assert len(image_results) == 2  # two render_still turns happened
+    older, newest = image_results[0], image_results[1]
+    # the latest still is kept verbatim for the model to actually look at
+    assert newest.images == (b"fake-png",)
+    # the older still's bytes are evicted and replaced with a cheap text stub
+    assert older.images == ()
+    assert older.text and "image omitted" in older.text
+
+
 def test_system_prompt_carries_vocabulary_and_the_loop_contract() -> None:
     from videogen.agent.prompts import SYSTEM_PROMPT
 
@@ -556,3 +592,54 @@ def test_dispatch_sfx_applies_scene_audio_and_passes_the_event_timeline() -> Non
     assert scene is not None and scene.audio is not None and scene.audio.sound.value == "whoosh"
     # the Director (loop) built and handed the event timeline to the worker
     assert "event_timeline" in dispatcher.calls[0]
+
+
+# --- beat-plan execution (beat-plan/01, ADR 0012) ---------------------------------------------
+
+from videogen.agent.beat_plan import AssetSpec, Beat, BeatPlan  # noqa: E402
+
+
+class FakeBeatDispatcher:
+    """Stands in for the beat-driven creative-direction worker: returns a BeatPlan plus the
+    beat-keyed assets that serve it, all in one proposal (the walking-skeleton path)."""
+
+    def __init__(self, beat_plan: BeatPlan, assets: tuple[NewAsset, ...] = ()) -> None:
+        self.calls: list[dict] = []
+        self._beat_plan = beat_plan
+        self._assets = assets
+
+    def __call__(self, guidance: dict) -> WorkerProposal:
+        self.calls.append(guidance)
+        return WorkerProposal(
+            proposal_text="beat plan: b1 is the payoff",
+            new_assets=self._assets,
+            beat_plan=self._beat_plan,
+        )
+
+
+def test_a_dispatch_carrying_a_beat_plan_places_assets_without_the_model_emitting_ops() -> None:
+    asset = NewAsset("asset_b1", Asset(type=AssetType.image, src="b1.png"), "payoff", beat_id="b1")
+    plan = BeatPlan(
+        beats=(
+            Beat(
+                id="b1",
+                transcript_span=(0, 1),  # words hello..world -> 0.1s..1.0s
+                role="climax",
+                intent="the payoff lands",
+                asset_spec=AssetSpec(kind="broll-image"),
+            ),
+        )
+    )
+    dispatcher = FakeBeatDispatcher(beat_plan=plan, assets=(asset,))
+    # The model only dispatches and finishes -- it never emits add_scene/fill_region. The placement
+    # is the deterministic execute() phase, not a model tool call.
+    client = ScriptedClient([turn(call("dispatch_creative_direction")), turn(call("finish"))])
+    loop, builder, _store, _doc = make_loop(
+        client, dispatchers={"dispatch_creative_direction": dispatcher}
+    )
+    loop.run()
+
+    scene = builder.get_scene("beat-b1")
+    assert scene is not None
+    assert scene.start == 0.1 and scene.end == 1.0
+    assert scene.regions[RegionName.full].asset == "asset_b1"

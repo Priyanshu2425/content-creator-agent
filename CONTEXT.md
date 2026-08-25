@@ -43,7 +43,7 @@ A transcript-synced text cue on the dedicated `captions` track — carries `text
 _Avoid_: subtitle, text overlay, title
 
 **Base caption**:
-The default transcript-synced subtitle. The `captions` track is auto-populated from the transcript word-timings — *not* authored op-by-op by the Director — and every base caption takes the brand kit's **default caption style**.
+The default transcript-synced subtitle. The `captions` track is populated **in bulk** from the transcript word-timings — *not* authored one caption at a time — and every base caption takes the brand kit's **default caption style**. Both pipelines produce the same track: the director-loop fills it on the Director's instruction; the chain fills it deterministically in its **reconcile step**. A composition with no base captions is a defect, not a style choice.
 _Avoid_: subtitle, default caption (as the canonical term)
 
 **Feature caption**:
@@ -51,7 +51,7 @@ A caption the Director / creative-direction agent places deliberately for a hook
 _Avoid_: custom caption, hook caption
 
 **Caption style**:
-A registered entry `{id, description, param schema, defaults, renderer}` controlling one caption visual. Resolved through the **caption style registry** exactly as an **overlay type** is resolved through the overlay registry — `id` is an open registry key (validated against the registry; unknown id errors, or skip-with-warning under `strict: false`), *not* a closed enum. Built-ins: `pill`, `word-bold`, `kinetic` (the original generic karaoke look, now configs of one renderer) and `highlight-box` (neon highlighter boxes with per-word pop). Adding a visual = register a new entry; the core schema is untouched.
+A registered entry `{id, description, param schema, defaults, renderer}` controlling one caption visual. Resolved through the **caption style registry** exactly as an **overlay type** is resolved through the overlay registry — `id` is an open registry key (validated against the registry; unknown id errors, or skip-with-warning under `strict: false`), *not* a closed enum. Built-ins: `pill`, `word-bold`, `kinetic` (the original generic karaoke look, now configs of one renderer), `highlight-box` (neon highlighter boxes with per-word pop), and `tiktok` (a port of Remotion's TikTok template — heavy text with a thick black stroke, a line pop-in, and the spoken word recoloured bright green; the current default). Adding a visual = register a new entry; the core schema is untouched.
 _Avoid_: caption type, font, caption preset
 
 **Caption renderer**:
@@ -117,7 +117,7 @@ The orchestrator agent — the former *authoring agent*, renamed. Owns everythin
 _Avoid_: authoring agent (old name), orchestrator-as-author
 
 **Worker**:
-A specialist sub-agent the Director dispatches. A worker returns a **proposal** (candidates / a list / intents) — never a Composition and never a rendered final. The Director decides what to accept and is the only agent that authors the document. Three workers: `TextHookAgent`, `BrollGeneratorAgent`, `SFXAgent`.
+A specialist sub-agent the Director dispatches. A worker returns a **proposal** (candidates / a list / intents) — never a Composition and never a rendered final. The Director decides what to accept and is the only agent that authors the document. Workers: `TextHookAgent`, `BrollGeneratorAgent`, `SFXAgent`, `CreativeDirectionAgent`, `MotionGraphicsAgent`. A worker may have an alternate **ToT variant** (a deliberating implementation selected by a `tot_enabled` flag) that returns the same proposal shape — the Director's dispatch contract is identical either way.
 _Avoid_: sub-agent (informal), tool (a worker is dispatched, not a Builder op)
 
 **Proposal**:
@@ -137,6 +137,44 @@ _Avoid_: title card, caption, subtitle
 
 **Spoken hook**:
 The first line(s) the creator actually says, already in the recording. The text hook must say something *different but consistent* — a second angle, never a transcript of the spoken hook.
+
+**Payoff frame**:
+A candidate interpretation of *what the viewer gets* from the video — e.g. literal/practical, emotional/identity, or contrarian/myth-busting. A transcript usually supports more than one. The chosen frame is upstream of and determines which text hooks are even possible, so it is the substance a hook is built on (not its tone). A deliberating `TextHookAgent` weighs several frames before committing.
+_Avoid_: angle (too vague), payoff (the payoff is the thing gained; the frame is the interpretation of it)
+
+**Creative concept**:
+The governing visual strategy a piece of creative direction commits to — the core metaphor + treatment that the hook, b-roll map, pacing, and CTA all answer to. The `CreativeDirectionAgent`'s upstream analogue of a payoff frame: several legitimate concepts exist per transcript, and the chosen one dictates the whole downstream execution.
+_Avoid_: theme, idea, direction (the *direction* is the finished document; the *concept* is the strategy it commits to)
+
+## Pipelines (resolving)
+
+**Pipeline**:
+The end-to-end walk from a host recording + brief to a finished mp4. The shared front half (ingest → transcribe → ideal-cuts) is identical for every run; the back half (how the Composition is authored) is chosen by a **pipeline strategy**. Selected per run via `make --pipeline {director-loop, chain}`.
+_Avoid_: flow, run (a run is one execution of a pipeline)
+
+**Director-loop pipeline**:
+The default (ADR 0008). After the shared front half, the **Director** authors the Composition by *pulling* workers on demand — the model decides which specialist to dispatch, when, and turns each accepted proposal into validated Builder ops one per turn. Adaptive: it can skip a worker, re-dispatch a weak proposal, or sequence a worker after the visuals it depends on.
+_Avoid_: default pipeline (informal), authoring loop (old name for the loop inside it)
+
+**Chain pipeline**:
+The fixed-order alternative (ADR 0013) that *coexists* with the director-loop pipeline and shares the same workers. After the shared front half it runs creative direction → { broll, motion-graphics, text hook } (parallel) → prep → **Composer** → SFX → render. The *pipeline* decides dispatch, not a model — there is no adaptive Director. Exists to A/B the topology (fixed order + single integrator) against the loop with the workers held constant.
+_Avoid_: linear pipeline, chain mode
+
+**Pipeline strategy**:
+The swappable object that owns a pipeline's back half behind the shared front half. `DirectorLoopStrategy` (default) or `ChainStrategy`. The fork seam sits after ideal-cuts.
+_Avoid_: pipeline type, mode
+
+**Composer**:
+The chain pipeline's terminal agent — *not* the Director. A single **no-tools Opus 4.8 Claude Code SDK** call that emits a **Composition directly** (Composition-layer authoring, above the kernel; it never authors a kernel op). It does **LLM-decided placement** from a deterministically prepared bundle of time-anchored `(Beat, Asset|None)` pairs, deciding only region / layout / treatment / gap-fill. Knowingly opts out of the Director's deterministic placement (ADR 0012 `execute()`) for the chain pipeline only. Guarded by an inviolable *no wrong-role back-fill* rule (asserted post-hoc) and the IR validator (bounded re-prompt on failure).
+_Avoid_: director (the chain has no Director), assembler, integrator, builder
+
+**Prep step**:
+The deterministic (no-model) stage between the chain's workers and the Composer. Two lookups: **zip** each beat to its asset by `beat_id` (a missing asset → an explicit `None` pair) and **resolve** each beat's word-index `transcript_span` to concrete `[start_s, end_s]` from the transcript word-timings. Hands the Composer time-anchored `(Beat, Asset|None)` pairs so the LLM never does beat↔asset matching or timestamp arithmetic.
+_Avoid_: prepare, join step, binder
+
+**Reconcile step**:
+The deterministic (no-model) stage **after** the Composer in the chain — the mirror of the **prep step**. It applies the corrections that are pure functions of ground truth, not judgment: filling the **base captions** track from the transcript word-timings in the brand kit's style, and **animating** any still held longer than the static-image limit with a slow zoom (animate, never shorten — the voiceover master clock fixes spans). Things the Composer is *not* asked to do because they are mechanical, not creative.
+_Avoid_: post-process, cleanup, finalize (which is the separate review gate)
 
 ## Flagged ambiguities
 

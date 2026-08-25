@@ -24,7 +24,6 @@ from videogen.kernel.composition import (
     AdditiveOverlay,
     AssetId,
     Caption,
-    CaptionStyle,
     Composition,
     LayoutName,
     Overlay,
@@ -60,7 +59,7 @@ class ActiveCaption:
     """A caption cue active at ``t`` on the dedicated captions track (always painted)."""
 
     text: str
-    style: CaptionStyle
+    style: str  # an open caption style registry id (ADR 0010), e.g. pill / word-bold / kinetic
     z: int
 
 
@@ -190,7 +189,7 @@ def timeline(composition: Composition, *, duration: float) -> str:
 
 def _caption_line(caption: Caption) -> str:
     return (
-        f"  [{caption.start:.2f}-{caption.end:.2f}] {caption.style.value} "
+        f"  [{caption.start:.2f}-{caption.end:.2f}] {caption.style} "
         f"(z{caption.z}) \"{caption.text}\""
     )
 

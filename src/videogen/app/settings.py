@@ -29,10 +29,10 @@ class Settings(BaseModel):
 
     # Which authoring ModelClient drives the loop. Known names are the keys of
     # ``cli._AUTHORING_CLIENTS`` (claude-code, gemini, anthropic, nvidia, perplexity).
-    authoring_client: str = "gemini"
+    authoring_client: str = "openrouter"
     # The model id for that client. ``null`` keeps the client's own default (e.g. claude-code ->
     # claude-sonnet-4-6; claude-code with null also follows the CLI's configured model).
-    authoring_model: str | None = None
+    authoring_model: str | None = "deepseek/deepseek-v4-flash"
     # Which reviewer runs the finalization gate: "claude" reads the final Composition JSON via Claude
     # Code (structural/editorial review, the default); "gemini" watches the rendered mp4 for motion
     # issues. Gemini stays available -- this only chooses the default.
@@ -42,13 +42,16 @@ class Settings(BaseModel):
     advisor_model: str = "gemini-2.5-flash"
     # Nano Banana (Gemini 2.5 Flash Image) — the still-image model for GenerateBrollAgent.
     broll_image_model: str = "gemini-2.5-flash-image"
+    # The chain pipeline's Composer model (ADR 0013): Opus 4.8 via the Claude Code SDK by default.
+    # Only used under ``--pipeline chain``; override to run the Composer on another model.
+    composer_model: str = "claude-opus-4-8"
     # The finalization gate's bounded render -> review -> edit round cap.
     max_review_rounds: int = 2
     # Target platform for IdealCutsAgent and GenerateBrollAgent (e.g. Instagram, TikTok, Shorts).
     platform: str = "Instagram"
     # Gemini asset describer: when true, every non-voiceover asset is described before authoring.
     # Requires GOOGLE_API_KEY / GEMINI_API_KEY. Provides description + usage_advice per asset.
-    asset_descriptions: bool = False
+    asset_descriptions: bool = True
     describer_model: str = "gemini-2.5-flash-lite"
 
 

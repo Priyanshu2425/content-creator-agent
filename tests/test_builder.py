@@ -15,7 +15,6 @@ from videogen.kernel.builder import Builder
 from videogen.kernel.composition import (
     Asset,
     AssetType,
-    CaptionStyle,
     CropRect,
     InsertOverlay,
     LayoutName,
@@ -121,7 +120,7 @@ def test_add_caption_appends_to_the_captions_track() -> None:
     b = _builder()
     b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
     b.fill_region("s0", RegionName.full, "host")
-    result = b.add_caption("hello", 0.2, 0.8, CaptionStyle.pill)
+    result = b.add_caption("hello", 0.2, 0.8, "pill")
     assert result.ok
     assert [c.text for c in b.composition.captions] == ["hello"]
 
@@ -137,7 +136,7 @@ def test_add_captions_from_transcript_maps_words_to_absolute_seconds() -> None:
             Word(text="now", start=1.0, end=1.4),
         ]
     )
-    result = b.add_captions_from_transcript(transcript, style=CaptionStyle.word_bold)
+    result = b.add_captions_from_transcript(transcript, style="word-bold")
     assert result.ok
     caps = b.composition.captions
     # the three words (no pause over the line-break gap, under the word cap) form one karaoke line
@@ -149,7 +148,7 @@ def test_add_captions_from_transcript_maps_words_to_absolute_seconds() -> None:
         ("world", 0.5, 0.9),
         ("now", 1.0, 1.4),
     ]
-    assert caps[0].style == CaptionStyle.word_bold
+    assert caps[0].style == "word-bold"
 
 
 def test_add_captions_breaks_lines_on_a_natural_pause() -> None:
@@ -185,7 +184,7 @@ def test_caption_out_of_bounds_is_rejected_and_leaves_doc_unchanged() -> None:
     b = _builder()
     b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
     b.fill_region("s0", RegionName.full, "host")
-    result = b.add_caption("late", 9.0, 12.0, CaptionStyle.pill)
+    result = b.add_caption("late", 9.0, 12.0, "pill")
     assert not result.ok
     assert ErrorCode.CAPTION_OUT_OF_BOUNDS in _codes(result.errors)
     assert b.composition.captions == []
@@ -325,10 +324,10 @@ def test_update_caption_restyles() -> None:
     b = _builder()
     b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
     b.fill_region("s0", RegionName.full, "host")
-    b.add_caption("hi", 0.0, 1.0, CaptionStyle.pill)
-    result = b.update_caption(0, style=CaptionStyle.kinetic)
+    b.add_caption("hi", 0.0, 1.0, "pill")
+    result = b.update_caption(0, style="kinetic")
     assert result.ok
-    assert b.composition.captions[0].style == CaptionStyle.kinetic
+    assert b.composition.captions[0].style == "kinetic"
 
 
 # --- delete ---
@@ -347,8 +346,8 @@ def test_delete_caption_removes_it() -> None:
     b = _builder()
     b.add_scene(LayoutName.full, 0.0, DURATION, id="s0")
     b.fill_region("s0", RegionName.full, "host")
-    b.add_caption("a", 0.0, 1.0, CaptionStyle.pill)
-    b.add_caption("b", 1.0, 2.0, CaptionStyle.pill)
+    b.add_caption("a", 0.0, 1.0, "pill")
+    b.add_caption("b", 1.0, 2.0, "pill")
     result = b.delete_caption(0)
     assert result.ok
     assert [c.text for c in b.composition.captions] == ["b"]

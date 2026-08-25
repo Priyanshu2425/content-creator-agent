@@ -17,12 +17,14 @@ Composition -> IR function.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from videogen.kernel.composition import Composition, Overlay, RegionName, Scene, TransitionKind
 from videogen.kernel.ir import (
     IR,
     AudioLayer,
+    HookLayer,
     Keyframe,
     Layer,
     MediaLayer,
@@ -33,7 +35,12 @@ from videogen.kernel.ir import (
     Value,
 )
 from videogen.kernel.registry import CompileContext, OverlayKind, Registry, default_registry
-from videogen.plugins.captions.styles import compile_caption_style
+from videogen.plugins.captions.registry import (
+    UnknownCaptionStyleError,
+    default_caption_registry,
+)
+
+logger = logging.getLogger(__name__)
 
 # v1 output canvas: vertical 9:16, ready for short-form platforms without reformatting.
 DEFAULT_WIDTH = 1080
@@ -127,11 +134,23 @@ def compile_ir(
                 )
             )
 
-    # Captions: each compiles to one `text` Layer at its own high `z` (above the media layers), the
-    # style baked into visual props plus, for `kinetic`, opacity/scale keyframe tracks. The compiler
-    # owns the style->IR mapping so the backend interprets only the three Layer kinds (ADR 0002).
+    # Captions: each compiles to one `text` Layer at its own high `z` (above the media layers),
+    # carrying its style id (authoritative -- the backend dispatches to the caption renderer keyed
+    # by it) plus the renderer's params and, for a pop-in, opacity/scale keyframe tracks. The
+    # style->IR mapping is owned by the caption style registry (ADR 0010). An unknown id is an error
+    # by default (already rejected at Caption construction), downgraded to skip-with-warning under
+    # `strict: False` -- the same rule as an unknown overlay type.
+    caption_registry = default_caption_registry()
     for caption in composition.captions:
-        style = compile_caption_style(caption.style, caption.start, caption.end)
+        try:
+            style = caption_registry.compile(caption.style, caption.start, caption.end)
+        except UnknownCaptionStyleError:
+            if composition.strict:
+                raise
+            logger.warning(
+                "skipping caption with unknown style %r (strict=False)", caption.style
+            )
+            continue
         if caption.words:
             # Karaoke line: one run per word carrying its spoken window, so the backend can
             # highlight the current word. The whole line is on screen for the caption's span.
@@ -149,14 +168,33 @@ def compile_ir(
                 opacity=style.opacity,
                 transform=style.transform,
                 runs=runs,
-                style=caption.style.value,
-                props=style.props,
+                style=caption.style,
+                params=style.props,
             )
         )
 
     # Additive inserts join the flat layer list; the backend paints everything in z order, so an
     # insert sits in the one shared z space alongside captions (CONTEXT.md "z (paint order)").
     layers.extend(insert_layers)
+
+    # The opening text-hook (ADR 0013): a kernel-level singleton, always emitted when present, painted
+    # above everything (the backend dispatches it to its hook renderer). Starts at t=0, spans its
+    # duration (clamped to the timeline). Colours/brand are already brand-kit-resolved at creation;
+    # the `or` falls back to the layer defaults defensively.
+    if composition.hook is not None:
+        hook = composition.hook
+        layers.append(
+            HookLayer(
+                start=0.0,
+                end=min(hook.duration, duration),
+                z=1000,
+                text=hook.text,
+                text_color=hook.text_color or "#0A0A0A",
+                box_color=hook.box_color or "#FF6B35",
+                brand=hook.brand or "buildspace labs",
+                placement=hook.placement,
+            )
+        )
 
     return IR(width=width, height=height, fps=fps, duration=duration, layers=layers)
 

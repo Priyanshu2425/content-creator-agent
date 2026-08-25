@@ -21,7 +21,6 @@ from videogen.kernel.composition import (
     AssetType,
     Audio,
     Caption,
-    CaptionStyle,
     Composition,
     CropRect,
     InsertOverlay,
@@ -149,7 +148,7 @@ def test_kinetic_text_layer_carries_opacity_and_scale_keyframes(
     kinetic = next(
         layer for layer in ir.layers if layer.kind == "text" and layer.style == "kinetic"
     )
-    caption = next(c for c in comp.captions if c.style.value == "kinetic")
+    caption = next(c for c in comp.captions if c.style == "kinetic")
 
     # Opacity rises 0 -> 1 over a short pop window from the caption start.
     opacity = kinetic.opacity.keyframes
@@ -413,7 +412,7 @@ def test_transform_overlay_does_not_scale_the_captions_above_it() -> None:
     comp = _overlay_comp(
         _full_host(),
         [ZoomOverlay(start=0.0, end=4.0, target=RegionName.full, to_scale=1.5)],
-        captions=[Caption(text="hi", start=1.0, end=2.0, style=CaptionStyle.pill)],
+        captions=[Caption(text="hi", start=1.0, end=2.0, style="pill")],
     )
     ir = compile_ir(comp, fps=30, duration=4.0)
 
@@ -451,7 +450,7 @@ def test_insert_adds_one_painted_layer_ordered_by_z_against_captions() -> None:
     comp = _overlay_comp(
         _full_host(),
         [InsertOverlay(start=1.0, end=3.0, target=RegionName.full, z=50, asset="broll")],
-        captions=[Caption(text="hi", start=1.0, end=2.0, style=CaptionStyle.pill)],  # z=100
+        captions=[Caption(text="hi", start=1.0, end=2.0, style="pill")],  # z=100
     )
     ir = compile_ir(comp, fps=30, duration=4.0)
 
@@ -490,7 +489,7 @@ def _effects_composition() -> Composition:
                 start=1.0, end=3.0, target=RegionName.full, z=50, asset="broll", fade=0.4
             ),
         ],
-        captions=[Caption(text="watch this", start=0.5, end=2.0, style=CaptionStyle.pill)],
+        captions=[Caption(text="watch this", start=0.5, end=2.0, style="pill")],
     )
 
 

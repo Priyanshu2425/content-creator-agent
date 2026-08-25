@@ -14,9 +14,51 @@ from pathlib import Path
 from typing import Any
 
 from videogen import log, tracing
+from videogen.agent.beat_plan import BeatPlan, beat_plan_from_dict
 from videogen.agent.model import ModelClient, UserMessage
 
 _BRAND_KIT_DIR = Path(__file__).parent.parent.parent.parent / "brand-kit"
+
+# Appended to the user payload when the worker must emit a typed BeatPlan (ADR 0012). The reasoning in
+# the system prompt is unchanged; only the *delivery* tightens from prose to a machine-readable plan
+# the Director executes by binding, instead of re-reading prose.
+_BEAT_PLAN_OUTPUT = """\
+
+## Output contract (REQUIRED)
+After your reasoning, output a single fenced ```json block and NOTHING after it. It is the BeatPlan the
+Director will execute -- one beat per visual moment, in narrative order:
+
+```json
+{
+  "beats": [
+    {
+      "id": "b1",
+      "transcript_span": [START_WORD_INDEX, END_WORD_INDEX],
+      "role": "world-1 | world-2 | climax | resolution | cta",
+      "intent": "one line: what this moment must land",
+      "asset_spec": {
+        "kind": "broll-image | broll-video | motion-graphic | host-aroll | stat-viz",
+        "brief": "what to generate (omit for host-aroll)",
+        "treatment": "optional style hint"
+      }
+    }
+  ]
+}
+```
+
+Rules:
+- ``transcript_span`` is a pair of **word indices** into the transcript (0-based), not seconds.
+- Give every beat a stable, unique ``id``.
+- A ``host-aroll`` beat reserves the talking head and carries no generation brief.
+- KEEP B-ROLL BEATS SHORT: a broll-image / broll-video / motion-graphic / stat-viz beat must cover at
+  most ~1.5 seconds of speech (just a few words). B-roll is never held on screen longer than 1.5s.
+  Split a longer visual moment into several short consecutive beats (each its own asset) rather than
+  one long beat. Host-aroll beats may be longer.
+- STYLE PER BEAT: for a broll-image / broll-video beat, you MAY name one of the **Nano Banana image
+  styles** listed above (by its id and name, e.g. "1.1 Hyper-Realistic Crowd Composition") in the
+  beat's ``asset_spec.treatment`` so the b-roll generator renders that look. Prefer instantly-readable
+  styles (the shot is on screen ≤1.5s); avoid detail-heavy styles (infographics, diagrams) for fast cuts.
+"""
 
 SYSTEM_PROMPT = """\
 # SYSTEM PROMPT: Lead Creative Director Agent
@@ -62,10 +104,11 @@ B-roll, dynamic typography) — or, for decks/carousels, every slide must earn t
 scroll/glance and speak directly to the audience's pain point.
 - **Sound Design as Visual Glue** (video only): recommend specific audio cues — whooshes, risers, \
 pops, J-cuts/L-cuts — tied to specific transitions.
-- **Static image rule (critical):** A static image (still photo, AI-generated b-roll) shown for \
-more than **1 second** looks dead on mobile. Always specify static images for ≤1s cuts only. If \
-a concept needs to hold for 2–4s, prescribe **motion graphics** (dispatch_motion_graphics) instead \
-— they are animated and designed to hold attention. Never recommend a static image for a 2–4s hold.
+- **B-roll duration cap (critical):** No b-roll cutaway — still image, generated video, motion \
+graphic, or stat-viz — stays on screen longer than **~1.5 seconds**. The viewer's eye must never \
+settle on a single b-roll frame. If a concept needs more time, split it into several short \
+consecutive cutaways (a new angle/subject each) rather than one long hold, or cut back to the \
+speaker. Static stills are the most fragile — keep them to ≤1s. Only the host/a-roll may run longer.
 
 For static media, replace this section with the **Instant Hierarchy Check**: what does the eye see \
 in order — first 1 second, next 2 seconds, then the rest? If the CTA or core message isn't in that \
@@ -156,6 +199,47 @@ class CreativeDirectionAgent:
         brand_kit: dict[str, Any] | None = None,
         scratchpad: str = "",
         guidance: str = "",
+    ) -> BeatPlan:
+        """Produce a typed BeatPlan (ADR 0012): the same creative reasoning, delivered as a
+        machine-readable plan the Director executes by binding rather than re-reading prose."""
+        text = self._run(
+            brief=brief,
+            transcript=transcript,
+            brand_kit=brand_kit,
+            scratchpad=scratchpad,
+            guidance=guidance,
+            output_contract=_BEAT_PLAN_OUTPUT,
+        )
+        return beat_plan_from_dict(_extract_json(text))
+
+    def generate_prose(
+        self,
+        *,
+        brief: str,
+        transcript: str,
+        brand_kit: dict[str, Any] | None = None,
+        scratchpad: str = "",
+        guidance: str = "",
+    ) -> str:
+        """The legacy prose proposal, retained as the ``beat_plan_enabled=off`` fallback (ADR 0012)."""
+        return self._run(
+            brief=brief,
+            transcript=transcript,
+            brand_kit=brand_kit,
+            scratchpad=scratchpad,
+            guidance=guidance,
+            output_contract="",
+        )
+
+    def _run(
+        self,
+        *,
+        brief: str,
+        transcript: str,
+        brand_kit: dict[str, Any] | None,
+        scratchpad: str,
+        guidance: str,
+        output_contract: str,
     ) -> str:
         payload, images = _build_payload(
             brief=brief,
@@ -164,6 +248,7 @@ class CreativeDirectionAgent:
             scratchpad=scratchpad,
             guidance=guidance,
         )
+        payload += output_contract
         model = getattr(self._client, "model", "unknown") or "unknown"
         with tracing.agent_span("creative-direction-agent", input_summary={"guidance": guidance}):
             with tracing.model_generation(
@@ -176,9 +261,35 @@ class CreativeDirectionAgent:
                 )
             tracing.update_generation_output(turn.text)
 
-        result = turn.text or ""
         log.get().agent_event_complete("CreativeDirectionAgent", duration_ms=0)
-        return result
+        return turn.text or ""
+
+
+def _extract_json(text: str) -> dict:
+    """Pull the BeatPlan JSON object out of the model's reply.
+
+    Accepts a bare object or one in a ```json fence, and tolerates reasoning before it by scanning
+    from the last ``{`` that parses. A reply with no parseable object raises ``ValueError`` -- the
+    graceful prose->BeatPlan degrade is a later slice; here a malformed reply fails loudly.
+    """
+    fenced = text.split("```json")
+    if len(fenced) > 1:
+        candidate = fenced[-1].split("```")[0].strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    while start != -1:
+        try:
+            obj, _ = decoder.raw_decode(text[start:])  # parses a prefix; trailing prose is fine
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{", start + 1)
+    raise ValueError("creative direction produced no parseable BeatPlan JSON")
 
 
 _IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -204,6 +315,29 @@ def _brand_kit_context() -> tuple[str, tuple[bytes, ...]]:
     return "\n\n".join(text_parts), tuple(images)
 
 
+def _load_nanobanana_styles() -> str:
+    """The Nano Banana image-style menu from brand-kit/nanobanana_styles.json, or '' if absent.
+
+    Given to creative direction so it can pick a style per b-roll beat (named in the beat's
+    ``treatment``); the b-roll generator receives the same menu and applies the chosen style."""
+    styles_path = _BRAND_KIT_DIR / "nanobanana_styles.json"
+    if not styles_path.exists():
+        return ""
+    try:
+        data = json.loads(styles_path.read_text(encoding="utf-8"))
+        lines = [
+            "## Nano Banana image styles available for b-roll (reference one by id/name in a beat's "
+            "asset_spec.treatment so the b-roll generator applies it)"
+        ]
+        for cat in data.get("categories", []):
+            lines.append(f"\n### {cat['id']}. {cat['name']}")
+            for s in cat.get("styles", []):
+                lines.append(f"  {s['id']} — **{s['name']}**: {s['description']}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_payload(
     *,
     brief: str,
@@ -223,6 +357,9 @@ def _build_payload(
         parts.append(f"Brand kit reference material:\n{bk_text}")
     if bk_images:
         parts.append(f"Brand kit includes {len(bk_images)} reference image(s) attached above — use them to inform visual style.")
+    style_menu = _load_nanobanana_styles()
+    if style_menu:
+        parts.append(style_menu)
     if scratchpad and scratchpad.strip() != "(scratchpad is empty)":
         parts.append(f"Director's current thinking:\n{scratchpad}")
     parts.append(f"Transcript:\n{transcript}")

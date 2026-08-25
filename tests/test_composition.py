@@ -13,7 +13,6 @@ from videogen.kernel.composition import (
     AssetType,
     Audio,
     Caption,
-    CaptionStyle,
     Composition,
     InsertOverlay,
     LayoutName,
@@ -74,9 +73,9 @@ def make_composition() -> Composition:
         ],
         overlays=overlays,
         captions=[
-            Caption(text="hello", start=0.0, end=1.0, style=CaptionStyle.pill),
-            Caption(text="WORLD", start=1.0, end=2.0, style=CaptionStyle.word_bold),
-            Caption(text="pop", start=2.0, end=3.0, style=CaptionStyle.kinetic),
+            Caption(text="hello", start=0.0, end=1.0, style="pill"),
+            Caption(text="WORLD", start=1.0, end=2.0, style="word-bold"),
+            Caption(text="pop", start=2.0, end=3.0, style="kinetic"),
         ],
     )
 

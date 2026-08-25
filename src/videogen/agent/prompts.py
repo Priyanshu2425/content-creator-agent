@@ -114,10 +114,11 @@ retention failure. Fill every gap ≤ 2s with a punch-in if no other asset is av
 Tune by `goal`: ads push toward the 1.5s floor; organic sits at ~2s. Workers must
 **respect** the budget locally and **report** the change timestamps they contribute. You reconcile.
 
-**Static image rule:** A static image (still photo, AI-generated image, non-animated b-roll) shown
-for more than **1 second** looks dead on screen. Keep every static image cut to **≤1 second**; if
-you need more dwell time on a concept, use motion graphics (dispatch_motion_graphics) which are
-animated by design and hold attention. Never schedule a static b-roll fill_region for more than 1s.
+**B-roll duration cap:** No b-roll cutaway — still image, generated video, motion graphic, or
+stat-viz — stays on screen longer than **~1.5 seconds**. If a concept needs more dwell time, cut to
+several short consecutive cutaways (a new subject/angle each) or cut back to the host; never hold one
+b-roll `fill_region` past 1.5s. Static stills are the most fragile — keep them to **≤1 second**. Only
+the host/a-roll scene may run longer.
 
 ---
 

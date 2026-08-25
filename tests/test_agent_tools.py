@@ -19,20 +19,14 @@ from videogen.agent.tools import (
     TOOLS,
     VISION_OPS,
     apply_op,
-    build_overlay,
 )
 from videogen.kernel.builder import Builder
 from videogen.kernel.composition import (
-    Anchor,
     Asset,
     AssetType,
-    CaptionStyle,
-    InsertOverlay,
     LayoutName,
-    PanOverlay,
     RegionName,
     TransitionKind,
-    ZoomOverlay,
 )
 
 
@@ -100,14 +94,42 @@ def test_add_caption_tool_mirrors_the_builder_op() -> None:
         "add_caption",
         {"text": "hi", "start": 0.2, "end": 0.8, "style": "word-bold"},
     )
-    direct = fresh_builder().add_caption("hi", 0.2, 0.8, CaptionStyle.word_bold)
+    direct = fresh_builder().add_caption("hi", 0.2, 0.8, "word-bold")
 
     assert via_tool == direct
 
 
+def test_base_captions_take_the_brand_kit_default_style_when_unspecified() -> None:
+    # Base captions (auto-populated transcript track) default to the brand kit's caption style id
+    # when the Director names none (ADR 0010 / caption-library issue 04).
+    b = fresh_builder()
+    apply_op(
+        b,
+        "add_captions_from_transcript",
+        {},
+        transcript=TRANSCRIPT,
+        default_caption_style="highlight-box",
+    )
+    assert b.composition.captions
+    assert all(c.style == "highlight-box" for c in b.composition.captions)
+
+
+def test_feature_caption_style_overrides_the_brand_kit_default() -> None:
+    # A deliberately chosen (feature) style wins over the brand kit default.
+    b = fresh_builder()
+    apply_op(
+        b,
+        "add_captions_from_transcript",
+        {"style": "kinetic"},
+        transcript=TRANSCRIPT,
+        default_caption_style="pill",
+    )
+    assert all(c.style == "kinetic" for c in b.composition.captions)
+
+
 def test_add_captions_from_transcript_tool_mirrors_the_builder_op() -> None:
     via_tool = _dispatch(fresh_builder(), "add_captions_from_transcript", {"style": "kinetic"})
-    direct = fresh_builder().add_captions_from_transcript(TRANSCRIPT, style=CaptionStyle.kinetic)
+    direct = fresh_builder().add_captions_from_transcript(TRANSCRIPT, style="kinetic")
 
     assert via_tool == direct
 
@@ -125,46 +147,9 @@ def test_set_transition_tool_mirrors_the_builder_add_transition_op() -> None:
     assert b_tool.composition == b_direct.composition
 
 
-# --- add_overlay: flat tool args build the right Overlay subclass via the kernel union ---
-
-
-def test_build_overlay_constructs_each_subclass_from_flat_args() -> None:
-    zoom = build_overlay(
-        {"type": "zoom", "start": 0.0, "end": 2.0, "params": {"from_scale": 1.0, "to_scale": 1.3}}
-    )
-    pan = build_overlay(
-        {"type": "pan", "start": 0.0, "end": 2.0, "params": {"dx": 0.1, "dy": 0.0}}
-    )
-    insert = build_overlay(
-        {
-            "type": "insert",
-            "start": 0.0,
-            "end": 1.0,
-            "params": {"asset": "broll", "anchor": "top-right", "scale": 0.3},
-        }
-    )
-
-    assert isinstance(zoom, ZoomOverlay) and zoom.to_scale == 1.3
-    assert isinstance(pan, PanOverlay) and pan.dx == 0.1
-    assert isinstance(insert, InsertOverlay)
-    assert insert.asset == "broll" and insert.anchor is Anchor.top_right
-
-
-def test_add_overlay_tool_mirrors_the_builder_op() -> None:
-    b_tool = fresh_builder()
-    b_tool.add_scene(LayoutName.full, 0.0, 2.0, id="s0")
-    via_tool = _dispatch(
-        b_tool,
-        "add_overlay",
-        {"type": "zoom", "start": 0.0, "end": 2.0, "params": {"from_scale": 1.0, "to_scale": 1.2}},
-    )
-
-    b_direct = fresh_builder()
-    b_direct.add_scene(LayoutName.full, 0.0, 2.0, id="s0")
-    direct = b_direct.add_overlay(ZoomOverlay(start=0.0, end=2.0, from_scale=1.0, to_scale=1.2))
-
-    assert via_tool == direct
-    assert b_tool.composition == b_direct.composition
+# Overlays (zoom/pan/insert) live on the Builder but are deliberately NOT a Director tool: the model
+# never calls add_overlay directly -- overlays are placed internally (e.g. by add_title) or by the
+# motion-graphics worker. The Builder op itself is covered in test_builder.py / test_overlays.py.
 
 
 # --- self-correction: an invalid op is rejected and leaves the document untouched ---
@@ -221,7 +206,6 @@ def _enum_choices(tool_name: str, prop: str) -> list[str]:
     [
         ("add_scene", "layout", LayoutName),
         ("fill_region", "region", RegionName),
-        ("add_caption", "style", CaptionStyle),
         ("set_transition", "kind", TransitionKind),
     ],
 )
@@ -229,5 +213,9 @@ def test_enum_choices_are_derived_from_the_kernel_enums(tool_name, prop, enum_cl
     assert _enum_choices(tool_name, prop) == [member.value for member in enum_cls]
 
 
-def test_add_overlay_type_choices_match_the_overlay_union() -> None:
-    assert set(_enum_choices("add_overlay", "type")) == {"zoom", "pan", "insert"}
+def test_caption_style_choices_are_derived_from_the_caption_registry() -> None:
+    # Caption styles are an open registry (ADR 0010), not a closed enum: the tool's choices come from
+    # the caption style registry, so a newly registered visual is offered without editing the tool.
+    from videogen.plugins.captions.registry import caption_style_ids
+
+    assert set(_enum_choices("add_caption", "style")) == set(caption_style_ids())

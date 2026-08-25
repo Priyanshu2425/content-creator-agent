@@ -91,10 +91,11 @@ def test_parse_turn_builds_a_single_tool_call_and_assigns_an_id() -> None:
     assert call.id  # an id is synthesized (the SDK has no native tool-call id here)
 
 
-def test_parse_turn_returns_an_empty_turn_when_the_reply_is_not_a_tool_call() -> None:
-    # ADR 0006: a hard parse failure ends the turn with no call -- the loop then stops cleanly.
-    assert _parse_turn("I think we're done here.") == AssistantTurn()
-    assert _parse_turn('{"args": {}}') == AssistantTurn()  # missing name
+def test_parse_turn_with_no_tool_call_preserves_the_free_text() -> None:
+    # ADR 0006: no tool call ends the turn with no call -- but the free text is preserved on
+    # AssistantTurn.text so the loop can read narration (single-turn agents like IdealCuts).
+    assert _parse_turn("I think we're done here.") == AssistantTurn(text="I think we're done here.")
+    assert _parse_turn('{"args": {}}') == AssistantTurn(text='{"args": {}}')  # missing name
 
 
 def test_next_turn_drives_the_query_seam_and_parses_the_reply() -> None:

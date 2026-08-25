@@ -24,12 +24,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from videogen.kernel.composition import (
+    AssetType,
     Composition,
     InsertOverlay,
     Overlay,
     RegionName,
+    Scene,
+    TransformOverlay,
 )
 from videogen.kernel.registry import get_layout, get_overlay, layout_regions
+
+# A still image left on screen longer than this with no motion reads as "dead" on a mobile feed
+# (the Director's static-image rule). Held past it without a zoom/pan overlay, the validator warns.
+STATIC_IMAGE_MAX_SECONDS = 1.0
 
 
 class ErrorCode(StrEnum):
@@ -63,6 +70,7 @@ class WarningCode(StrEnum):
     SCENE_GAP = "scene_gap"
     TRAILING_GAP = "trailing_gap"
     NO_SCENES = "no_scenes"
+    STATIC_IMAGE_TOO_LONG = "static_image_too_long"
 
 
 @dataclass(frozen=True)
@@ -307,7 +315,47 @@ def validate_global(composition: Composition, *, duration: float) -> list[Global
             )
         )
 
+    warnings.extend(_static_image_warnings(composition))
     return warnings
+
+
+def _static_image_warnings(composition: Composition) -> list[GlobalWarning]:
+    """Warn for any still-image region fill held longer than ``STATIC_IMAGE_MAX_SECONDS`` with no
+    zoom/pan overlay over it -- a motionless image past ~1s reads as dead on a feed. A transform
+    overlay (a punch-in) on the region makes it non-static, so it is exempt; video fills never warn.
+    """
+    out: list[GlobalWarning] = []
+    for scene in composition.scenes:
+        held = scene.end - scene.start
+        if held <= STATIC_IMAGE_MAX_SECONDS:
+            continue
+        for region, ref in scene.regions.items():
+            asset = composition.assets.get(ref.asset)
+            if asset is None or asset.type is not AssetType.image:
+                continue
+            if _has_motion_cover(composition, scene, region):
+                continue
+            out.append(
+                GlobalWarning(
+                    WarningCode.STATIC_IMAGE_TOO_LONG,
+                    f"scene '{scene.id}' holds the static image '{ref.asset}' for {held:.2f}s "
+                    f"(> {STATIC_IMAGE_MAX_SECONDS:.0f}s) in region '{getattr(region, 'value', region)}' with no "
+                    f"punch-in; shorten it or add a zoom/pan so it isn't dead on screen",
+                    (scene.start, scene.end),
+                )
+            )
+    return out
+
+
+def _has_motion_cover(composition: Composition, scene: Scene, region: RegionName) -> bool:
+    """Whether a transform overlay (zoom/pan) animates ``region`` during ``scene``'s span -- which
+    makes a still image non-static. Any overlapping transform on that exact region counts."""
+    return any(
+        isinstance(o, TransformOverlay)
+        and o.target == region
+        and _overlaps(o.start, o.end, scene.start, scene.end)
+        for o in composition.overlays
+    )
 
 
 def validate(composition: Composition, *, duration: float) -> ValidationResult:
