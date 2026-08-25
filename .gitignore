@@ -18,6 +18,24 @@ node_modules/
 renders/
 out/
 
+# Media binaries
+*.mp4
+*.mp3
+*.wav
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ttf
+*.woff
+*.woff2
+*.excalidraw
+
+# Brand kit / design assets
+brand-kit/design_inspiration.jpg
+system_design.png
+system_design.excalidraw
+
 # Secrets
 .env
 .env.*
